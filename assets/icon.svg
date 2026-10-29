@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="tile" x2="1" y2="1">
+      <stop stop-color="#344b3b"/>
+      <stop offset="1" stop-color="#14251d"/>
+    </linearGradient>
+    <linearGradient id="sky" x2="0" y2="1">
+      <stop stop-color="#bdd2b2"/>
+      <stop offset="1" stop-color="#8dac8b"/>
+    </linearGradient>
+    <clipPath id="photo"><rect x="56" y="52" width="144" height="126" rx="9"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)"/>
+  <rect x="9" y="9" width="238" height="238" rx="53" fill="none" stroke="#5f7962" stroke-width="2"/>
+  <rect x="40" y="37" width="176" height="187" rx="20" fill="#0c1c14" opacity=".32"/>
+  <rect x="40" y="32" width="176" height="187" rx="20" fill="#f5f1e6"/>
+  <g clip-path="url(#photo)">
+    <rect x="56" y="52" width="144" height="126" fill="url(#sky)"/>
+    <circle cx="163" cy="84" r="16" fill="#fff0bd"/>
+    <path d="M44 160 102 92 154 149 182 118 218 167V190H44Z" fill="#648568"/>
+    <path d="M40 180 104 130 139 159 171 137 215 177V196H40Z" fill="#2c513e"/>
+  </g>
+  <rect x="104" y="193" width="48" height="6" rx="3" fill="#809779"/>
+</svg>

@@ -1,0 +1,154 @@
+name: Windows draft release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-draft-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: '2'
+      RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-msvc
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
+
+      - name: Read version and validate tag
+        id: version
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to read Cargo metadata' }
+          $package = ($metadata | ConvertFrom-Json).packages | Where-Object name -EQ 'photo-frame'
+          $version = $package.version
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $tag"
+          }
+          $existingTag = git tag --list $tag
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect Git tags' }
+          if ($existingTag) {
+            $tagCommit = git rev-parse "$tag^{commit}"
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve release tag' }
+            if ($tagCommit -ne $env:GITHUB_SHA) { throw "Existing tag $tag points to a different commit" }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Locate Windows shader compiler
+        run: |
+          $fxc = $env:GPUI_FXC_PATH
+          if (-not $fxc -or -not (Test-Path -LiteralPath $fxc -PathType Leaf)) {
+            $fxc = (Get-Command fxc.exe -ErrorAction SilentlyContinue).Source
+          }
+          if (-not $fxc) {
+            $kitRoot = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' -Name KitsRoot10 -ErrorAction SilentlyContinue
+            $roots = @($env:WindowsSdkDir, $kitRoot, "${env:ProgramFiles(x86)}\Windows Kits\10") |
+              Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+            foreach ($root in $roots) {
+              $versions = Get-ChildItem -LiteralPath (Join-Path $root 'bin') -Directory -Force -ErrorAction SilentlyContinue |
+                Where-Object Name -Match '^\d+\.\d+\.\d+\.\d+$' |
+                Sort-Object { [version]$_.Name } -Descending
+              foreach ($sdk in $versions) {
+                $candidate = Join-Path $sdk.FullName 'x64\fxc.exe'
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                  $fxc = $candidate
+                  break
+                }
+              }
+              if ($fxc) { break }
+            }
+          }
+          if (-not $fxc) { throw 'Windows SDK fxc.exe was not found' }
+          "GPUI_FXC_PATH=$fxc" >> $env:GITHUB_ENV
+          Write-Host "Using FXC: $fxc"
+
+      - name: Check and test
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw 'Formatting check failed' }
+          cargo clippy --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
+          cargo test --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+
+      - name: Build release
+        run: |
+          cargo build --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
+
+      - name: Package ZIP
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $name = "PhotoFrame-$env:APP_VERSION-windows-x64"
+          $package = Join-Path $env:GITHUB_WORKSPACE "target\package\$name"
+          New-Item -ItemType Directory -Path "$package\licenses" -Force | Out-Null
+          Copy-Item -LiteralPath 'target\release\photo-frame.exe' -Destination $package
+          Copy-Item -LiteralPath 'LICENSE', 'THIRD_PARTY_NOTICES.md' -Destination $package
+          Copy-Item -Path 'licenses\*' -Destination "$package\licenses"
+          @(
+            "印框 · PhotoFrame $env:APP_VERSION - Windows x64"
+            ''
+            'Extract the ZIP and run photo-frame.exe.'
+            'Requires the Microsoft Visual C++ x64 Runtime.'
+            'Runtime installer: https://aka.ms/vc14/vc_redist.x64.exe'
+          ) | Set-Content -LiteralPath "$package\README.txt" -Encoding utf8
+          $zip = Join-Path $env:GITHUB_WORKSPACE "target\package\$name.zip"
+          Compress-Archive -Path "$package\*" -DestinationPath $zip -Force
+          "RELEASE_ZIP=$zip" >> $env:GITHUB_ENV
+
+      - name: Upload ZIP to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = $env:RELEASE_TAG
+          $pagesJson = gh api --paginate --slurp "repos/$repo/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to query releases' }
+          $pages = $pagesJson | ConvertFrom-Json -NoEnumerate
+          $existing = $null
+          foreach ($page in $pages) {
+            foreach ($release in $page) {
+              if ($release.tag_name -eq $tag) { $existing = $release }
+            }
+          }
+          if ($existing) {
+            if (-not $existing.draft) { throw "Release $tag is already published" }
+            gh release edit $tag --repo $repo --draft --target $env:GITHUB_SHA --title "印框 · PhotoFrame $env:APP_VERSION"
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to update draft target' }
+            gh release upload $tag $env:RELEASE_ZIP --repo $repo --clobber
+          } else {
+            $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+            "印框 · PhotoFrame $env:APP_VERSION for Windows x64.`n`nExtract the ZIP and run photo-frame.exe.`n`nRequires the [Microsoft Visual C++ x64 Runtime](https://aka.ms/vc14/vc_redist.x64.exe)." |
+              Set-Content -LiteralPath $notes -Encoding utf8
+            gh release create $tag $env:RELEASE_ZIP --repo $repo --draft --target $env:GITHUB_SHA --title "印框 · PhotoFrame $env:APP_VERSION" --notes-file $notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release upload failed' }
