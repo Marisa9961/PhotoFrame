@@ -2,6 +2,185 @@ use super::effects::inside;
 use super::*;
 use crate::settings::Ratio;
 
+fn cached_photo() -> Arc<Photo> {
+    Arc::new(Photo {
+        image: DynamicImage::ImageRgba8(RgbaImage::from_fn(320, 200, |x, y| {
+            Rgba([x as u8, y as u8, 120, (x % 256) as u8])
+        })),
+        fields: [("camera".into(), "Camera A".into())].into(),
+    })
+}
+
+fn assert_base_reused(engine: &Engine) {
+    assert_eq!(engine.timings.resize, Duration::ZERO);
+    assert_eq!(engine.timings.background, Duration::ZERO);
+    assert_eq!(engine.timings.shadow, Duration::ZERO);
+    assert_eq!(engine.timings.photograph, Duration::ZERO);
+}
+
+#[test]
+fn cached_preview_caption_edits_match_fresh_render_without_rebuilding_base() {
+    let photo = cached_photo();
+    let mut engine = Engine::default();
+    let mut reference = Engine::default();
+    let mut settings = Settings {
+        footer: 30,
+        title: "Original".into(),
+        subtitle: String::new(),
+        ..Settings::default()
+    };
+    let original = engine
+        .compose_cached_preview(&photo, &settings, (400, 400))
+        .unwrap();
+    for edit in 0..10 {
+        match edit {
+            0 => settings.title = "{camera}".into(),
+            1 => settings.subtitle = "Second line".into(),
+            2 => settings.text_color = [20, 200, 90],
+            3 => settings.font_size = 42,
+            4 => settings.line_gap = 8,
+            5 => settings.align = 0,
+            6 => settings.font_bold = !settings.font_bold,
+            7 => settings.font_italic = !settings.font_italic,
+            8 => settings.font_family = Some("monospace".into()),
+            _ => {
+                settings.force_custom = true;
+                settings
+                    .custom
+                    .insert("camera".into(), "Edited camera".into());
+                settings.uppercase = true;
+            }
+        }
+        let cached = engine
+            .compose_cached_preview(&photo, &settings, (400, 400))
+            .unwrap();
+        assert_base_reused(&engine);
+        assert_eq!(
+            cached,
+            reference
+                .compose_preview(&photo, &settings, (400, 400))
+                .unwrap()
+        );
+        assert_ne!(cached, original);
+    }
+    // Preferences that only affect export must not invalidate the preview base.
+    settings.max_edge = 100;
+    settings.quality = 50;
+    settings.format = crate::settings::Format::Png;
+    engine
+        .compose_cached_preview(&photo, &settings, (400, 400))
+        .unwrap();
+    assert_base_reused(&engine);
+}
+
+#[test]
+fn cached_preview_invalidates_for_each_base_dependency_and_viewport() {
+    let photo = cached_photo();
+    let mut engine = Engine::default();
+    let mut reference = Engine::default();
+    let mut settings = Settings::default();
+    engine
+        .compose_cached_preview(&photo, &settings, (400, 400))
+        .unwrap();
+    for edit in 0..10 {
+        match edit {
+            0 => settings.padding += 2,
+            1 => settings.horizontal_padding = Some(12),
+            2 => settings.footer += 8,
+            3 => settings.ratio = Ratio::Square,
+            4 => settings.blur = 15,
+            5 => settings.background_dim = 70,
+            6 => settings.radius = 10,
+            7 => settings.shadow = false,
+            8 => settings.background = Background::Solid,
+            _ => settings.color = [12, 34, 56],
+        }
+        let cached = engine
+            .compose_cached_preview(&photo, &settings, (400, 400))
+            .unwrap();
+        assert!(engine.timings.background > Duration::ZERO);
+        assert_eq!(
+            cached,
+            reference
+                .compose_preview(&photo, &settings, (400, 400))
+                .unwrap()
+        );
+    }
+    let small = engine
+        .compose_cached_preview(&photo, &settings, (120, 80))
+        .unwrap();
+    assert!(engine.timings.resize > Duration::ZERO);
+    assert_eq!(
+        small,
+        reference
+            .compose_preview(&photo, &settings, (120, 80))
+            .unwrap()
+    );
+    engine
+        .compose_cached_preview(&photo, &settings, (120, 80))
+        .unwrap();
+    assert_base_reused(&engine);
+}
+
+#[test]
+fn cached_preview_replaces_source_and_does_not_affect_export() {
+    let mut photo = cached_photo();
+    let mut engine = Engine::default();
+    let settings = Settings::default();
+    let original = engine
+        .compose_cached_preview(&photo, &settings, (400, 400))
+        .unwrap();
+    assert!(Arc::get_mut(&mut photo).is_none());
+    let old = Arc::downgrade(&photo);
+    let mut replacement = Photo {
+        image: photo.image.clone(),
+        fields: photo.fields.clone(),
+    };
+    replacement.image.as_mut_rgba8().unwrap().fill(255);
+    photo = Arc::new(replacement);
+    let changed = engine
+        .compose_cached_preview(&photo, &settings, (400, 400))
+        .unwrap();
+    assert!(old.upgrade().is_none());
+    assert_ne!(original, changed);
+    assert_eq!(
+        changed,
+        Engine::default()
+            .compose_preview(&photo, &settings, (400, 400))
+            .unwrap()
+    );
+    let exported = engine.compose(&photo, &settings, false).unwrap();
+    assert!(engine.preview_base.is_none());
+    assert_eq!(
+        exported,
+        Engine::default().compose(&photo, &settings, false).unwrap()
+    );
+}
+
+#[test]
+fn oversized_preview_base_is_not_retained() {
+    let mut photo = Arc::new(Photo {
+        image: DynamicImage::ImageRgb8(image::RgbImage::new(3000, 3000)),
+        fields: Default::default(),
+    });
+    let settings = Settings {
+        background: Background::Solid,
+        padding: 0,
+        horizontal_padding: Some(0),
+        footer: 0,
+        shadow: false,
+        radius: 0,
+        ..Settings::default()
+    };
+    let mut engine = Engine::default();
+    let output = engine
+        .compose_cached_preview(&photo, &settings, (3000, 3000))
+        .unwrap();
+    assert!(output.as_raw().len() > preview::BASE_BUDGET);
+    assert!(engine.preview_base.is_none());
+    assert!(Arc::get_mut(&mut photo).is_some());
+}
+
 #[test]
 fn preview_fits_display_pixels_without_changing_export_settings() {
     let photo = Photo {

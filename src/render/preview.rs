@@ -1,12 +1,49 @@
-use super::{Photo, load_preview};
+use super::{Layout, Photo, load_preview};
+use crate::settings::{Background, Settings};
 use crate::tr;
 use anyhow::Result;
+use image::RgbaImage;
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
     time::SystemTime,
 };
+
+// One caption-free canvas, bounded independently of the decoded-photo LRU.
+pub(super) const BASE_BUDGET: usize = 32 * 1024 * 1024;
+
+#[derive(PartialEq)]
+pub(super) struct BaseKey {
+    layout: Layout,
+    background: Background,
+    color: [u8; 3],
+    blur: u32,
+    dim: u32,
+    radius: u32,
+    shadow: bool,
+}
+
+impl BaseKey {
+    pub fn new(layout: &Layout, settings: &Settings) -> Self {
+        Self {
+            layout: layout.clone(),
+            background: settings.background,
+            color: settings.color,
+            blur: settings.blur,
+            dim: settings.background_dim,
+            radius: settings.radius,
+            shadow: settings.shadow,
+        }
+    }
+}
+
+pub(super) struct CachedBase {
+    // A strong reference prevents both address reuse and mutation via Arc::get_mut.
+    pub photo: Arc<Photo>,
+    pub key: BaseKey,
+    pub pixels: RgbaImage,
+}
 
 #[derive(PartialEq)]
 struct Stamp {

@@ -35,6 +35,54 @@ fn photo() -> Photo {
 }
 
 #[test]
+fn cached_preview_redraws_changed_logos_and_recovers_after_missing_logo() {
+    let directory = Scratch::new();
+    let logo = directory.0.join("logo.png");
+    let photo = std::sync::Arc::new(photo());
+    let mut engine = Engine::default();
+    let mut reference = Engine::default();
+    let mut settings = Settings {
+        footer: 30,
+        title: "Caption".into(),
+        subtitle: String::new(),
+        ..Settings::default()
+    };
+    let without_logo = engine
+        .compose_cached_preview(&photo, &settings, (300, 300))
+        .unwrap();
+    settings.logo = Some(logo.clone());
+    assert!(
+        engine
+            .compose_cached_preview(&photo, &settings, (300, 300))
+            .is_err()
+    );
+    let mut previous = without_logo.clone();
+    for color in [[255, 0, 0, 255], [0, 255, 0, 128]] {
+        RgbaImage::from_pixel(20, 20, Rgba(color))
+            .save(&logo)
+            .unwrap();
+        let actual = engine
+            .compose_cached_preview(&photo, &settings, (300, 300))
+            .unwrap();
+        assert_eq!(
+            actual,
+            reference
+                .compose_preview(&photo, &settings, (300, 300))
+                .unwrap()
+        );
+        assert_ne!(actual, previous);
+        previous = actual;
+    }
+    settings.logo = None;
+    assert_eq!(
+        engine
+            .compose_cached_preview(&photo, &settings, (300, 300))
+            .unwrap(),
+        without_logo
+    );
+}
+
+#[test]
 fn language_is_an_independent_preference_and_older_configs_follow_system() {
     use photo_frame::i18n::Language;
     let dir = Scratch::new();

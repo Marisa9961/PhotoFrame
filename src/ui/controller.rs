@@ -277,7 +277,9 @@ impl Studio {
                     let state = preview_state.get_or_insert_with(PreviewState::default);
                     state.photos.retain(&paths);
                     let photo = state.photos.load(&path, target.0.max(target.1))?;
-                    let mut pixels = state.engine.compose_preview(&photo, &settings, target)?;
+                    let mut pixels = state
+                        .engine
+                        .compose_cached_preview(&photo, &settings, target)?;
                     let dimensions = pixels.dimensions();
                     for pixel in pixels.pixels_mut() {
                         pixel.0.swap(0, 2);

@@ -1,6 +1,6 @@
 use crate::settings::{Ratio, Settings};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     pub width: u32,
     pub height: u32,
