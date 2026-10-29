@@ -18,17 +18,17 @@ impl Studio {
         let template_name = cx.new(|cx| TextInput::new(tr!("text.templates"), cx));
         let title_subscription = cx.subscribe(&title_input, |this, input, _: &Changed, cx| {
             this.settings.title = input.read(cx).value();
-            this.refresh(cx);
+            this.refresh(PreviewTrigger::Input, cx);
         });
         let subtitle_subscription =
             cx.subscribe(&subtitle_input, |this, input, _: &Changed, cx| {
                 this.settings.subtitle = input.read(cx).value();
-                this.refresh(cx);
+                this.refresh(PreviewTrigger::Input, cx);
             });
         let subscription = cx.subscribe(&color_input, |this, input, _: &Changed, cx| {
             if let Some(color) = parse_color(&input.read(cx).value()) {
                 this.settings.color = color;
-                this.refresh(cx);
+                this.refresh(PreviewTrigger::Input, cx);
             } else {
                 this.status = tr!("errors.color");
                 cx.notify();
@@ -71,6 +71,7 @@ impl Studio {
             failures: vec![],
             preview_state: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
+            preview_task: None,
             cancel: Arc::new(AtomicBool::new(false)),
             color_input,
             title_input,
@@ -174,7 +175,7 @@ impl Studio {
         );
         if before == 0 && !self.photos.is_empty() {
             self.selected = 0;
-            self.refresh(cx);
+            self.refresh(PreviewTrigger::Immediate, cx);
         }
         cx.notify();
     }
@@ -213,7 +214,7 @@ impl Studio {
                             cx.notify();
                             return;
                         }
-                        this.refresh(cx);
+                        this.refresh(PreviewTrigger::Immediate, cx);
                     }
                 });
             }
@@ -237,9 +238,11 @@ impl Studio {
         })
         .detach();
     }
-    pub(super) fn refresh(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn refresh(&mut self, trigger: PreviewTrigger, cx: &mut Context<Self>) {
         self.pending_preset_restore = None;
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let request = PreviewRequest::new(self.generation.clone());
+        // Dropping the task cancels pending timers instead of retaining one per keystroke.
+        self.preview_task = None;
         let Some(path) = self.photos.get(self.selected).cloned() else {
             // Drop retained pixels without waiting on a background render's mutex.
             self.preview_state = Arc::new(Mutex::new(None));
@@ -259,42 +262,52 @@ impl Studio {
         let settings = self.settings.clone();
         let paths = self.photos.clone();
         let preview_state = self.preview_state.clone();
-        let token = self.generation.clone();
-        cx.spawn(async move |this, cx| {
-            Timer::after(Duration::from_millis(160)).await;
-            if token.load(Ordering::Relaxed) != generation {
+        self.preview_task = Some(cx.spawn(async move |this, cx| {
+            let delay = trigger.delay();
+            if !delay.is_zero() {
+                Timer::after(delay).await;
+            }
+            if !request.is_current() {
                 return;
             }
+            let worker_request = request.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     let mut preview_state = preview_state
                         .lock()
                         .map_err(|_| anyhow::anyhow!(tr!("errors.renderer")))?;
-                    if token.load(Ordering::Relaxed) != generation {
-                        anyhow::bail!(tr!("errors.preview_superseded"));
+                    if !worker_request.is_current() {
+                        return Ok(None);
                     }
                     let state = preview_state.get_or_insert_with(PreviewState::default);
                     state.photos.retain(&paths);
-                    let photo = state.photos.load(&path, target.0.max(target.1))?;
-                    let mut pixels = state
-                        .engine
-                        .compose_cached_preview(&photo, &settings, target)?;
+                    let Some(mut pixels) = worker_request.run(
+                        || state.photos.load(&path, target.0.max(target.1)),
+                        |photo| {
+                            state
+                                .engine
+                                .compose_cached_preview(&photo, &settings, target)
+                        },
+                    )?
+                    else {
+                        return Ok(None);
+                    };
                     let dimensions = pixels.dimensions();
                     for pixel in pixels.pixels_mut() {
                         pixel.0.swap(0, 2);
                     }
                     let image = Arc::new(RenderImage::new(vec![image::Frame::new(pixels)]));
-                    Ok::<_, anyhow::Error>((image, dimensions))
+                    Ok::<_, anyhow::Error>(Some((image, dimensions)))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation.load(Ordering::Relaxed) != generation {
+                if !request.is_current() {
                     return;
                 }
                 this.rendering = false;
                 match result {
-                    Ok((image, dimensions)) => {
+                    Ok(Some((image, dimensions))) => {
                         this.preview = Some(image);
                         this.preview_size = dimensions;
                     }
@@ -302,11 +315,11 @@ impl Studio {
                         this.preview = None;
                         this.status = tr!("errors.preview", error = format!("{e:#}"));
                     }
+                    Ok(None) => {}
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
         cx.notify();
     }
     pub(super) fn open_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -660,6 +673,6 @@ impl Studio {
                 return;
             }
         }
-        self.refresh(cx);
+        self.refresh(PreviewTrigger::Immediate, cx);
     }
 }

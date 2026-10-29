@@ -21,7 +21,7 @@ impl Render for Studio {
                         let _ = preview_owner.update(cx, |this, cx| {
                             if this.preview_target != target {
                                 this.preview_target = target;
-                                this.refresh(cx);
+                                this.refresh(PreviewTrigger::Resize, cx);
                             }
                         });
                     });

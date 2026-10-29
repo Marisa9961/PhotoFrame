@@ -2,6 +2,7 @@ mod controller;
 mod export_dialog;
 mod input;
 mod panels;
+mod preview;
 mod settings_dialog;
 mod view;
 mod widgets;
@@ -15,6 +16,7 @@ use photo_frame::{
     render::{self, Engine, PreviewCache},
     settings::{Background, Format, Ratio, Settings, StylePreset},
 };
+use preview::{PreviewRequest, PreviewTrigger};
 use settings_dialog::SettingsDialog;
 use std::{
     collections::BTreeMap,
@@ -23,7 +25,6 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
 };
 use widgets::*;
 
@@ -59,6 +60,7 @@ pub struct Studio {
     failures: Vec<String>,
     preview_state: Arc<Mutex<Option<PreviewState>>>,
     generation: Arc<AtomicU64>,
+    preview_task: Option<Task<()>>,
     cancel: Arc<AtomicBool>,
     color_input: Entity<TextInput>,
     title_input: Entity<TextInput>,
