@@ -241,12 +241,10 @@ fn ratios_contain_photo() {
     }
 }
 #[test]
-fn round_corners() {
+fn row_spans_match_the_original_pixel_mask() {
+    // Anchor the reference mask before checking every span against it.
     assert!(!inside(0, 0, 100, 100, 10));
     assert!(inside(50, 50, 100, 100, 10));
-}
-#[test]
-fn row_spans_match_the_original_pixel_mask() {
     for (w, h) in [(1, 1), (2, 3), (17, 8), (80, 60)] {
         for radius in [0, 1, 2, 8, 100] {
             for y in 0..h {

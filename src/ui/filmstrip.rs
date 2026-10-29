@@ -1,5 +1,42 @@
-use super::thumbnails::{FilmstripWindow, ITEM_STRIDE, ITEM_WIDTH};
 use super::*;
+use std::ops::Range;
+
+const ITEM_WIDTH: f32 = 126.;
+const ITEM_STRIDE: f32 = ITEM_WIDTH + 12.;
+const OVERSCAN: usize = 2;
+
+struct FilmstripWindow {
+    visible: Range<usize>,
+    rendered: Range<usize>,
+    offset: f32,
+}
+
+impl FilmstripWindow {
+    /// Slots include the trailing import button. Clamp offsets after removals/resizes.
+    fn new(slots: usize, offset: f32, width: f32) -> Self {
+        let width = width.max(0.);
+        let offset = offset
+            .max(0.)
+            .min((slots as f32 * ITEM_STRIDE - width).max(0.));
+        let start = ((offset / ITEM_STRIDE).floor() as usize).min(slots);
+        let end = (((offset + width) / ITEM_STRIDE).ceil() as usize).min(slots);
+        Self {
+            visible: start..end,
+            rendered: start.saturating_sub(OVERSCAN)..end.saturating_add(OVERSCAN).min(slots),
+            offset,
+        }
+    }
+
+    fn wanted(&self, photos: &[PathBuf]) -> Vec<PathBuf> {
+        // Visible photos first, then the immediate neighbors (never the import slot).
+        self.visible
+            .clone()
+            .chain((self.rendered.start..self.visible.start).rev())
+            .chain(self.visible.end..self.rendered.end)
+            .filter_map(|index| photos.get(index).cloned())
+            .collect()
+    }
+}
 
 impl Studio {
     pub(super) fn filmstrip(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -140,40 +177,49 @@ impl Studio {
             )
             .into_any_element()
     }
+}
 
-    fn load_thumbnails(&mut self, cx: &mut Context<Self>) {
-        if self.thumbnail_task.is_some() || !self.thumbnails.has_pending() {
-            return;
-        }
-        self.thumbnail_task = Some(cx.spawn(async move |this, cx| {
-            loop {
-                let Ok(job) = this.update(cx, |this, _| {
-                    let job = this.thumbnails.next_job();
-                    if job.is_none() {
-                        this.thumbnail_task = None;
-                    }
-                    job
-                }) else {
-                    return;
-                };
-                let Some(job) = job else {
-                    return;
-                };
-                let source = job.clone();
-                let result = cx
-                    .background_executor()
-                    .spawn(async move { super::thumbnails::decode(&source).ok().flatten() })
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        this.thumbnails.finish(job, result);
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        }));
+#[cfg(test)]
+mod tests {
+    use super::{FilmstripWindow, ITEM_STRIDE};
+    use std::path::PathBuf;
+
+    fn paths(count: usize) -> Vec<PathBuf> {
+        (0..count)
+            .map(|index| PathBuf::from(format!("photo-{index}.png")))
+            .collect()
+    }
+
+    #[test]
+    fn large_filmstrips_render_only_the_viewport_and_two_neighbors_on_each_side() {
+        let photos = paths(100_000);
+        let view = FilmstripWindow::new(photos.len() + 1, 50_000. * ITEM_STRIDE, 3. * ITEM_STRIDE);
+        assert_eq!(view.visible, 50_000..50_003);
+        assert_eq!(view.rendered, 49_998..50_005);
+        assert_eq!(
+            view.wanted(&photos),
+            [50_000, 50_001, 50_002, 49_999, 49_998, 50_003, 50_004]
+                .map(|index| photos[index].clone())
+        );
+    }
+
+    #[test]
+    fn filmstrip_clamps_scroll_after_removing_photos_and_expanding_the_window() {
+        let photos = paths(5);
+        let end = FilmstripWindow::new(6, 100_000., ITEM_STRIDE * 2.);
+        assert_eq!(end.offset, ITEM_STRIDE * 4.);
+        assert_eq!(end.visible, 4..6);
+        assert_eq!(
+            end.wanted(&photos),
+            [4, 3, 2].map(|index| photos[index].clone())
+        );
+        let wide = FilmstripWindow::new(6, end.offset, 10. * ITEM_STRIDE);
+        assert_eq!(wide.offset, 0.);
+        assert_eq!(wide.rendered, 0..6);
+        let empty = FilmstripWindow::new(1, end.offset, 600.);
+        assert_eq!(empty.rendered, 0..1);
+        assert!(empty.wanted(&[]).is_empty());
+        let partial = FilmstripWindow::new(20, ITEM_STRIDE * 4.5, ITEM_STRIDE);
+        assert_eq!(partial.visible, 4..6);
     }
 }

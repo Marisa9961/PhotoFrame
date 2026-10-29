@@ -179,6 +179,12 @@ fn restoring_one_preset_preserves_other_presets_and_global_preferences() {
         settings.title = format!("修改 {i}");
     }
     settings.switch_preset(StylePreset::Dark);
+    // Restore an edited preset after a restart, while preserving the other histories.
+    settings.save_to(&path).unwrap();
+    let loaded = Settings::load_from(&path).unwrap();
+    assert_eq!(loaded, settings);
+    assert!(loaded.preset_modified());
+    let mut settings = loaded;
     let other_edits = settings.preset_edits.clone();
     settings.restore_preset(StylePreset::Dark);
     assert_eq!(settings.preset_edits, other_edits);
@@ -268,30 +274,6 @@ fn stored_preset_edits_are_normalized_without_overwriting_active_fields() {
     assert_eq!(restored.padding, 30);
     restored.switch_preset(StylePreset::Atmosphere);
     assert_eq!(restored.title, "当前编辑");
-}
-
-#[test]
-fn persisted_preset_restores_edits_without_mutating_the_system_preset() {
-    let dir = Scratch::new();
-    let path = dir.0.join("settings.json");
-    let mut settings = Settings::default();
-    settings.restore_preset(StylePreset::Dark);
-    settings.title = "旅行 · {camera}".into();
-    settings.ratio = Ratio::Wide;
-    settings.quality = 94;
-    settings
-        .caption_templates
-        .push(settings.caption_template("旅行".into()));
-    settings.save_to(&path).unwrap();
-    let mut restored = Settings::load_from(&path).unwrap();
-    assert_eq!(restored, settings);
-    assert_eq!(restored.selected_preset, Some(StylePreset::Dark));
-    assert!(restored.preset_modified());
-    restored.restore_preset(StylePreset::Dark);
-    assert!(!restored.preset_modified());
-    assert_eq!(restored.title, "{camera}");
-    assert_eq!(restored.quality, 94);
-    assert_eq!(restored.caption_templates, settings.caption_templates);
 }
 
 #[test]

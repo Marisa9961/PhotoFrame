@@ -122,30 +122,37 @@ mod tests {
     fn every_static_translation_call_has_both_translations() {
         let en = catalog(include_str!("../locales/en.json"));
         let zh = catalog(include_str!("../locales/zh-CN.json"));
-        for source in [
-            include_str!("main.rs"),
-            include_str!("ui/controller.rs"),
-            include_str!("ui/view.rs"),
-            include_str!("ui/panels.rs"),
-            include_str!("ui/export_dialog.rs"),
-            include_str!("ui/settings_dialog.rs"),
-            include_str!("ui/input.rs"),
-            include_str!("render/mod.rs"),
-            include_str!("render/photo.rs"),
-            include_str!("render/preview.rs"),
-            include_str!("render/jpeg.rs"),
-            include_str!("render/export.rs"),
-            include_str!("batch/mod.rs"),
-            include_str!("batch/memory.rs"),
-        ] {
-            for call in source.split("tr!(").skip(1) {
-                let call = call.trim_start();
-                if let Some(call) = call.strip_prefix('"') {
-                    let key = call.split('"').next().unwrap();
-                    assert!(
-                        en.contains_key(key) && zh.contains_key(key),
-                        "Missing translation: {key}"
-                    );
+        let mut directories =
+            vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(directory) = directories.pop() {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    directories.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let source = std::fs::read_to_string(&path).unwrap();
+                for (offset, _) in source.match_indices("tr!(") {
+                    // Match the macro token, excluding include_str! and quoted scan patterns.
+                    if source[..offset]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '"')
+                    {
+                        continue;
+                    }
+                    let call = source[offset + "tr!(".len()..].trim_start();
+                    if let Some(call) = call.strip_prefix('"') {
+                        let key = call.split('"').next().unwrap();
+                        assert!(
+                            en.contains_key(key) && zh.contains_key(key),
+                            "Missing translation in {}: {key}",
+                            path.display()
+                        );
+                    }
                 }
             }
         }
