@@ -1,9 +1,11 @@
 mod controller;
 mod export_dialog;
+mod filmstrip;
 mod input;
 mod panels;
 mod preview;
 mod settings_dialog;
+mod thumbnails;
 mod view;
 mod widgets;
 
@@ -13,13 +15,12 @@ pub(crate) use input::init;
 use input::{Changed, TextInput};
 use photo_frame::{i18n::Language, tr};
 use photo_frame::{
-    render::{self, Engine, PreviewCache},
+    render::{Engine, PreviewCache},
     settings::{Background, Format, Ratio, Settings, StylePreset},
 };
 use preview::{PreviewRequest, PreviewTrigger};
 use settings_dialog::SettingsDialog;
 use std::{
-    collections::BTreeMap,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -43,8 +44,10 @@ pub struct Studio {
     preview: Option<Arc<RenderImage>>,
     preview_size: (u32, u32),
     preview_target: (u32, u32),
-    thumbnails: BTreeMap<PathBuf, Arc<RenderImage>>,
+    thumbnails: thumbnails::Thumbnails,
+    thumbnail_task: Option<Task<()>>,
     filmstrip_scroll: ScrollHandle,
+    filmstrip_width: f32,
     styles_open: bool,
     composition_open: bool,
     layout_open: bool,

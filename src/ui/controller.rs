@@ -35,6 +35,7 @@ impl Studio {
             }
         });
         let release_subscription = cx.on_release(|this, _| {
+            this.thumbnails.cancel_active();
             if let Err(e) = this.flush_preferences() {
                 eprintln!("{}", tr!("errors.save_exit", error = e));
             }
@@ -54,8 +55,10 @@ impl Studio {
             preview: None,
             preview_size: (0, 0),
             preview_target: (0, 0),
-            thumbnails: BTreeMap::new(),
+            thumbnails: thumbnails::Thumbnails::default(),
+            thumbnail_task: None,
             filmstrip_scroll: ScrollHandle::new(),
+            filmstrip_width: 0.,
             styles_open: true,
             composition_open: false,
             layout_open: false,
@@ -128,42 +131,6 @@ impl Studio {
                 rejected += 1;
             }
         }
-        let new_paths = self.photos[before..].to_vec();
-        cx.spawn(async move |this, cx| {
-            for path in new_paths {
-                if this.update(cx, |this, _| this.photos.contains(&path)).ok() != Some(true) {
-                    continue;
-                }
-                let source = path.clone();
-                let result = cx
-                    .background_executor()
-                    .spawn(async move {
-                        let photo = render::load_preview(&source, 240)?;
-                        let mut pixels = photo.image.thumbnail(240, 120).to_rgba8();
-                        for p in pixels.pixels_mut() {
-                            p.0.swap(0, 2);
-                        }
-                        Ok::<_, anyhow::Error>(Arc::new(RenderImage::new(vec![image::Frame::new(
-                            pixels,
-                        )])))
-                    })
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.photos.contains(&path)
-                            && let Ok(image) = result
-                        {
-                            this.thumbnails.insert(path, image);
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
         self.status = tr!(
             "status.added",
             count = self.photos.len() - before,
@@ -247,7 +214,6 @@ impl Studio {
             // Drop retained pixels without waiting on a background render's mutex.
             self.preview_state = Arc::new(Mutex::new(None));
             self.preview = None;
-            self.thumbnails.retain(|path, _| self.photos.contains(path));
             self.rendering = false;
             cx.notify();
             return;
