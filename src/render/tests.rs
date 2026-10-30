@@ -1,6 +1,6 @@
-use super::effects::inside;
+use super::effects::{inside, shadow_mask};
 use super::*;
-use crate::settings::Ratio;
+use crate::settings::{Background, Ratio};
 
 fn cached_photo() -> Arc<Photo> {
     Arc::new(Photo {
@@ -16,6 +16,67 @@ fn assert_base_reused(engine: &Engine) {
     assert_eq!(engine.timings.background, Duration::ZERO);
     assert_eq!(engine.timings.shadow, Duration::ZERO);
     assert_eq!(engine.timings.photograph, Duration::ZERO);
+}
+
+#[test]
+fn preview_rounding_preserves_the_cached_canvas_without_resampling() {
+    let photo = Arc::new(Photo {
+        image: DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            1536,
+            1037,
+            image::Rgb([100, 120, 140]),
+        )),
+        fields: Default::default(),
+    });
+    let settings = Settings {
+        background: Background::Solid,
+        shadow: false,
+        title: String::new(),
+        subtitle: String::new(),
+        ..Settings::default()
+    };
+    let mut engine = Engine::default();
+    let actual = engine
+        .compose_cached_preview(&photo, &settings, (1536, 864))
+        .unwrap();
+    assert_eq!(actual.dimensions(), (1267, 864));
+    assert_eq!(&actual, &engine.preview_base.as_ref().unwrap().pixels);
+    let warm = engine
+        .compose_cached_preview(&photo, &settings, (1536, 864))
+        .unwrap();
+    assert_base_reused(&engine);
+    assert_eq!(&warm, &engine.preview_base.as_ref().unwrap().pixels);
+}
+
+#[test]
+fn preview_layout_fits_both_axes_without_upscaling_the_photo() {
+    for (w, h) in [(1536, 1037), (1536, 1140), (17, 8), (1, 10000), (10000, 1)] {
+        for ratio in [
+            Ratio::Auto,
+            Ratio::Square,
+            Ratio::Landscape,
+            Ratio::Portrait,
+            Ratio::Wide,
+        ] {
+            let settings = Settings {
+                ratio,
+                ..Settings::default()
+            };
+            for viewport in [(1536, 864), (864, 1536), (137, 93)] {
+                let layout = layout::preview_layout(w, h, &settings, viewport);
+                assert!(layout.width <= viewport.0 && layout.height <= viewport.1);
+                assert!(layout.photo_w <= w && layout.photo_h <= h);
+                assert!(layout.x + layout.photo_w <= layout.width);
+                assert!(layout.y + layout.photo_h <= layout.height);
+            }
+        }
+    }
+    let photo = cached_photo();
+    let mut engine = Engine::default();
+    let tiny = engine
+        .compose_preview(&photo, &Settings::default(), (1, 1))
+        .unwrap();
+    assert_eq!(tiny.dimensions(), (1, 1));
 }
 
 #[test]

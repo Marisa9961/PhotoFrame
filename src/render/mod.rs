@@ -1,4 +1,5 @@
 use crate::tr;
+mod base;
 mod caption;
 mod effects;
 mod export;
@@ -12,15 +13,16 @@ pub use layout::{Layout, layout};
 pub use photo::{Photo, load, load_preview};
 pub use preview::PreviewCache;
 
-use crate::settings::{Background, Settings};
+use crate::settings::Settings;
 use anyhow::{Result, bail};
-use effects::{row_inset, shadow_mask};
+use effects::row_inset;
 use image::{DynamicImage, Pixel, Rgba, RgbaImage, imageops};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
+/// Preview stages may overlap; their durations must not be summed as wall time.
 #[derive(Clone, Debug, Default)]
 pub struct ComposeTimings {
     pub resize: Duration,
@@ -69,15 +71,8 @@ impl Engine {
             viewport.0 > 0 && viewport.1 > 0,
             tr!("errors.viewport_size")
         );
-        let mut normalized = settings.clone();
-        normalized.normalize();
-        let full = layout(photo.image.width(), photo.image.height(), &normalized);
-        let fit = (viewport.0 as f64 / full.width as f64)
-            .min(viewport.1 as f64 / full.height as f64)
-            .min(1.);
-        let edge = (full.width.max(full.height) as f64 * fit).floor().max(1.) as u32;
-        let pixels = self.compose_at_edge(photo, &normalized, Some(edge), source)?;
-        // Layout rounding can change the short edge by a pixel.
+        let pixels = self.compose_at_edge(photo, settings, Some(viewport), source)?;
+        // Only exceptionally tiny viewports cannot contain even a 1 px photo and its frame.
         if pixels.width() > viewport.0 || pixels.height() > viewport.1 {
             Ok(DynamicImage::ImageRgba8(pixels)
                 .resize(viewport.0, viewport.1, imageops::FilterType::Lanczos3)
@@ -93,14 +88,14 @@ impl Engine {
         settings: &Settings,
         preview: bool,
     ) -> Result<RgbaImage> {
-        self.compose_at_edge(photo, settings, preview.then_some(1400), None)
+        self.compose_at_edge(photo, settings, preview.then_some((1400, 1400)), None)
     }
 
     fn compose_at_edge(
         &mut self,
         photo: &Photo,
         settings: &Settings,
-        preview_edge: Option<u32>,
+        preview_viewport: Option<(u32, u32)>,
         source: Option<&Arc<Photo>>,
     ) -> Result<RgbaImage> {
         self.timings = ComposeTimings::default();
@@ -109,17 +104,22 @@ impl Engine {
         s.normalize();
         self.captions.prepare_font(s.font.as_deref())?;
         let initial = layout(photo.image.width(), photo.image.height(), &s);
-        let max = if let Some(edge) = preview_edge {
-            edge
-        } else if s.max_edge > 0 {
+        let max = if s.max_edge > 0 {
             s.max_edge
         } else {
             initial.width.max(initial.height)
         };
-        let factor = (max as f64 / initial.width.max(initial.height) as f64).min(1.);
-        let w = (photo.image.width() as f64 * factor).round().max(1.) as u32;
-        let h = (photo.image.height() as f64 * factor).round().max(1.) as u32;
-        let l = layout(w, h, &s);
+        let l = if let Some(viewport) = preview_viewport {
+            layout::preview_layout(photo.image.width(), photo.image.height(), &s, viewport)
+        } else {
+            let factor = (max as f64 / initial.width.max(initial.height) as f64).min(1.);
+            layout(
+                (photo.image.width() as f64 * factor).round().max(1.) as u32,
+                (photo.image.height() as f64 * factor).round().max(1.) as u32,
+                &s,
+            )
+        };
+        let (w, h) = (l.photo_w, l.photo_h);
         if u64::from(l.width) * u64::from(l.height) > 120_000_000 {
             bail!(tr!("errors.output_limit"));
         }
@@ -134,46 +134,17 @@ impl Engine {
         } else {
             // Release obsolete buffers before allocating their replacement. Export never caches.
             self.preview_base = None;
-            let fg = photo
-                .image
-                .resize_exact(w, h, imageops::FilterType::Lanczos3)
-                .to_rgba8();
-            self.timings.resize = stage.elapsed();
-            let stage = Instant::now();
-            let mut canvas = match s.background {
-                Background::Solid => RgbaImage::from_pixel(
-                    l.width,
-                    l.height,
-                    Rgba([s.color[0], s.color[1], s.color[2], 255]),
-                ),
-                Background::Blur => {
-                    // Blur a reduced background to keep full-resolution batch export responsive.
-                    let bg_scale = (480. / l.width.max(l.height) as f32).min(1.);
-                    let bg = photo.image.resize_to_fill(
-                        (l.width as f32 * bg_scale).max(1.) as u32,
-                        (l.height as f32 * bg_scale).max(1.) as u32,
-                        imageops::FilterType::Triangle,
-                    );
-                    let bg = bg.blur(s.blur as f32 * 0.25);
-                    let mut bg = bg
-                        .resize_exact(l.width, l.height, imageops::FilterType::Triangle)
-                        .to_rgba8();
-                    // Dim only the backdrop: the photograph keeps its original exposure and color.
-                    for pixel in bg.pixels_mut() {
-                        for channel in &mut pixel.0[..3] {
-                            *channel = (u32::from(*channel) * (100 - s.background_dim) / 100) as u8;
-                        }
-                    }
-                    bg
-                }
-            };
+            let setup = stage.elapsed();
+            let layers = base::prepare(photo, &s, &l, preview_viewport.is_some());
+            let fg = layers.foreground;
+            let mut canvas = layers.canvas;
+            self.timings = layers.timings;
+            self.timings.resize += setup;
             let radius = (w.min(h) as f32 * s.radius as f32 / 100.).round() as u32;
-            self.timings.background = stage.elapsed();
             let stage = Instant::now();
             let opaque =
                 !photo.image.color().has_alpha() || fg.pixels().all(|pixel| pixel[3] == 255);
-            if s.shadow {
-                let mask = shadow_mask(&l, radius);
+            if let Some(mask) = layers.shadow {
                 for (y, (row, alpha)) in canvas
                     .as_mut()
                     .chunks_exact_mut(l.width as usize * 4)
@@ -195,7 +166,7 @@ impl Engine {
                     }
                 }
             }
-            self.timings.shadow = stage.elapsed();
+            self.timings.shadow += stage.elapsed();
             let stage = Instant::now();
             let width = l.width as usize * 4;
             for y in 0..h {
@@ -232,7 +203,7 @@ impl Engine {
         let stage = Instant::now();
         self.captions.draw(photo, &s, &l, &mut canvas)?;
         self.timings.text = stage.elapsed();
-        if canvas.width().max(canvas.height()) > max {
+        if preview_viewport.is_none() && canvas.width().max(canvas.height()) > max {
             // Integer rounding of the photo and margins must not exceed the requested cap.
             canvas = DynamicImage::ImageRgba8(canvas)
                 .resize(max, max, imageops::FilterType::Lanczos3)

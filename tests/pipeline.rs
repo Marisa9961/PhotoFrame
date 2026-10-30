@@ -682,7 +682,16 @@ fn jpeg_preview_reduces_pixels_and_preserves_original_metadata_and_export_size()
         format: Format::Png,
         ..Settings::default()
     };
-    let output = render::export(&mut Engine::default(), &source, &dir.0, &settings).unwrap();
+    // The UI's 1536 px request must not round up to a larger decoded-cache bucket.
+    let cached = render::PreviewCache::default().load(&source, 1536).unwrap();
+    assert_eq!(cached.image.dimensions(), (1536, 1152));
+    assert_eq!(cached.fields, full.fields);
+    let mut engine = Engine::default();
+    let composed = engine
+        .compose_cached_preview(&cached, &settings, (1536, 864))
+        .unwrap();
+    assert!(composed.width() <= 1536 && composed.height() <= 864);
+    let output = render::export(&mut engine, &source, &dir.0, &settings).unwrap();
     assert_eq!(image::image_dimensions(output).unwrap(), (1600, 1200));
 }
 

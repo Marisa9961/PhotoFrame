@@ -52,7 +52,7 @@ impl Studio {
             settings,
             photos: vec![],
             selected: 0,
-            preview: None,
+            preview: preview_display::PreviewDisplay::default(),
             preview_size: (0, 0),
             preview_target: (0, 0),
             thumbnails: thumbnails::Thumbnails::default(),
@@ -213,11 +213,12 @@ impl Studio {
         let Some(path) = self.photos.get(self.selected).cloned() else {
             // Drop retained pixels without waiting on a background render's mutex.
             self.preview_state = Arc::new(Mutex::new(None));
-            self.preview = None;
+            self.preview.clear();
             self.rendering = false;
             cx.notify();
             return;
         };
+        self.preview.select(&path);
         self.rendering = true;
         let target = self.preview_target;
         if target.0 == 0 || target.1 == 0 {
@@ -237,6 +238,7 @@ impl Studio {
                 return;
             }
             let worker_request = request.clone();
+            let preview_path = path.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move {
@@ -274,11 +276,12 @@ impl Studio {
                 this.rendering = false;
                 match result {
                     Ok(Some((image, dimensions))) => {
-                        this.preview = Some(image);
+                        this.preview
+                            .publish(preview_path, image, std::time::Instant::now());
                         this.preview_size = dimensions;
                     }
                     Err(e) => {
-                        this.preview = None;
+                        this.preview.clear();
                         this.status = tr!("errors.preview", error = format!("{e:#}"));
                     }
                     Ok(None) => {}
@@ -472,8 +475,11 @@ impl Studio {
                 return;
             }
             Command::Select(index) => {
+                if index >= self.photos.len() {
+                    cx.notify();
+                    return;
+                }
                 self.selected = index;
-                self.preview = None;
             }
             Command::Clear => {
                 self.photos.clear();

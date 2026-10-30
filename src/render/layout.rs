@@ -41,3 +41,34 @@ pub fn layout(w: u32, h: u32, s: &Settings) -> Layout {
         footer: footer.round() as u32,
     }
 }
+
+/// Choose integer photo dimensions whose rounded margins fit the actual viewport.
+/// Doing this before rasterization avoids resizing a finished canvas for a 1 px excess.
+pub(super) fn preview_layout(w: u32, h: u32, s: &Settings, viewport: (u32, u32)) -> Layout {
+    let fits = |layout: &Layout| layout.width <= viewport.0 && layout.height <= viewport.1;
+    let full = layout(w, h, s);
+    if fits(&full) {
+        return full;
+    }
+    let source_edge = w.max(h).max(1);
+    let at_edge = |edge: u32| {
+        let scale = edge as f64 / source_edge as f64;
+        layout(
+            (w as f64 * scale).round().max(1.) as u32,
+            (h as f64 * scale).round().max(1.) as u32,
+            s,
+        )
+    };
+    // Monotonic integer dimensions let us find the largest fit without repeated sampling.
+    let (mut low, mut high) = (1, source_edge);
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if fits(&at_edge(middle)) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    // A viewport smaller than even a 1 px photo plus its frame uses the tiny-image fallback.
+    at_edge(low)
+}

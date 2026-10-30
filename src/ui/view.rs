@@ -3,6 +3,14 @@ use super::*;
 impl Render for Studio {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let filmstrip = self.filmstrip(window, cx);
+        let now = std::time::Instant::now();
+        self.preview.advance(now);
+        for image in self.preview.take_retired() {
+            let _ = window.drop_image(image);
+        }
+        if self.preview.is_animating() {
+            window.request_animation_frame();
+        }
         let status = match &self.preference_error {
             Some(error) => format!("{} · {error}", self.status),
             None => self.status.clone(),
@@ -42,10 +50,18 @@ impl Render for Studio {
                     .into_owned()
             })
             .unwrap_or_default();
-        let preview = if let Some(image) = self.preview.clone() {
-            img(image)
+        let preview = if let Some(image) = self.preview.image().cloned() {
+            let opacity = self.preview.opacity(now);
+            div()
+                .relative()
                 .size_full()
-                .object_fit(ObjectFit::Contain)
+                .min_w_0()
+                .min_h_0()
+                .overflow_hidden()
+                .when_some(self.preview.previous().cloned(), |layer, previous| {
+                    layer.child(preview_layer(previous, 1. - opacity))
+                })
+                .child(preview_layer(image, opacity))
                 .into_any_element()
         } else {
             col()
@@ -123,6 +139,7 @@ impl Render for Studio {
                                             .items_center()
                                             .justify_center()
                                             .rounded_lg()
+                                            .overflow_hidden()
                                             .bg(rgb(0x0b1410))
                                             .border_1()
                                             .border_color(rgb(LINE))
@@ -148,6 +165,9 @@ impl Render for Studio {
                                                         div()
                                                             .relative()
                                                             .size_full()
+                                                            .min_w_0()
+                                                            .min_h_0()
+                                                            .overflow_hidden()
                                                             .flex()
                                                             .items_center()
                                                             .justify_center()
@@ -312,22 +332,109 @@ impl Render for Studio {
     }
 }
 
+fn preview_layer(image: Arc<RenderImage>, opacity: f32) -> Div {
+    let image_size = image.size(0);
+    let image = canvas(
+        move |bounds, _, _| preview_image_bounds(bounds, image_size),
+        move |bounds, fitted, window, _| {
+            if let Some(fitted) = fitted {
+                window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                    let _ = window.paint_image(fitted, Corners::default(), image, 0, false);
+                });
+            }
+        },
+    )
+    .size_full();
+    // A canvas has no intrinsic photo size/aspect ratio to expand the layout during a fade.
+    div()
+        .absolute()
+        .inset_0()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .overflow_hidden()
+        .opacity(opacity)
+        .child(image)
+}
+
+fn preview_image_bounds(
+    viewport: Bounds<Pixels>,
+    image_size: Size<DevicePixels>,
+) -> Option<Bounds<Pixels>> {
+    if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
+        return None;
+    }
+    Some(ObjectFit::Contain.get_bounds(viewport, image_size))
+}
+
+// A multiple of the decoded-photo cache's 512 px buckets keeps requests within this cap.
+const PREVIEW_MAX_EDGE: u32 = 1536;
+
 fn preview_pixels(width: f32, height: f32, scale: f32) -> (u32, u32) {
+    let width = (f64::from(width) * f64::from(scale)).ceil().max(0.);
+    let height = (f64::from(height) * f64::from(scale)).ceil().max(0.);
+    let limit = f64::from(PREVIEW_MAX_EDGE);
+    let fit = (limit / width.max(height)).min(1.);
     (
-        (width * scale).ceil().max(0.) as u32,
-        (height * scale).ceil().max(0.) as u32,
+        (width * fit).ceil().min(limit) as u32,
+        (height * fit).ceil().min(limit) as u32,
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::preview_pixels;
+    use super::{preview_image_bounds, preview_pixels};
+    use gpui::{Bounds, point, px, size};
 
     #[test]
-    fn preview_tracks_window_size_and_monitor_scale() {
+    fn both_fade_layers_fit_the_viewport_for_landscape_portrait_and_extreme_ratios() {
+        for (width, height) in [(800., 500.), (400., 700.), (500., 500.)] {
+            let viewport = Bounds::new(point(px(20.), px(40.)), size(px(width), px(height)));
+            for (w, h) in [
+                (1536u32, 864u32),
+                (864, 1536),
+                (1536, 1536),
+                (8000, 1),
+                (1, 8000),
+            ] {
+                let fitted = preview_image_bounds(viewport, size(w.into(), h.into())).unwrap();
+                let epsilon = px(0.001);
+                assert!(fitted.left() >= viewport.left() - epsilon);
+                assert!(fitted.top() >= viewport.top() - epsilon);
+                assert!(fitted.right() <= viewport.right() + epsilon);
+                assert!(fitted.bottom() <= viewport.bottom() + epsilon);
+                assert!((fitted.center().x - viewport.center().x).abs() < epsilon);
+                assert!((fitted.center().y - viewport.center().y).abs() < epsilon);
+            }
+        }
+        let viewport = Bounds::new(point(px(20.), px(40.)), size(px(800.), px(500.)));
+        let landscape =
+            preview_image_bounds(viewport, size(1536u32.into(), 864u32.into())).unwrap();
+        let epsilon = px(0.001);
+        assert!((landscape.left() - px(20.)).abs() < epsilon);
+        assert!((landscape.top() - px(65.)).abs() < epsilon);
+        assert!((landscape.size.width - px(800.)).abs() < epsilon);
+        assert!((landscape.size.height - px(450.)).abs() < epsilon);
+        let portrait = preview_image_bounds(viewport, size(864u32.into(), 1536u32.into())).unwrap();
+        assert!((portrait.size.width - px(281.25)).abs() < epsilon);
+        assert!((portrait.size.height - px(500.)).abs() < epsilon);
+        assert!(
+            preview_image_bounds(
+                Bounds::new(point(px(0.), px(0.)), size(px(0.), px(500.))),
+                size(100u32.into(), 100u32.into())
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn preview_tracks_display_pixels_with_a_proportional_resolution_cap() {
         assert_eq!(preview_pixels(960., 540., 1.), (960, 540));
-        assert_eq!(preview_pixels(960., 540., 2.), (1920, 1080));
-        assert_eq!(preview_pixels(1600., 900., 1.5), (2400, 1350));
+        assert_eq!(preview_pixels(960., 540., 2.), (1536, 864));
+        assert_eq!(preview_pixels(1600., 900., 1.5), (1536, 864));
+        assert_eq!(preview_pixels(900., 1600., 1.5), (864, 1536));
+        assert_eq!(preview_pixels(768., 768., 2.), (1536, 1536));
+        assert_eq!(preview_pixels(333., 777., 1.5), (500, 1166));
         assert_eq!(preview_pixels(0., 0., 2.), (0, 0));
     }
 }

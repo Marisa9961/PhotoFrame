@@ -3818,6 +3818,7 @@ dependencies = [
  "gpui",
  "image",
  "libjpeg-turbo-rs",
+ "rayon",
  "rust-i18n",
  "serde",
  "serde_json",

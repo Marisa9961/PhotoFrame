@@ -4,6 +4,7 @@ mod filmstrip;
 mod input;
 mod panels;
 mod preview;
+mod preview_display;
 mod settings_dialog;
 mod thumbnails;
 mod view;
@@ -41,7 +42,7 @@ pub struct Studio {
     preference_error: Option<String>,
     photos: Vec<PathBuf>,
     selected: usize,
-    preview: Option<Arc<RenderImage>>,
+    preview: preview_display::PreviewDisplay,
     preview_size: (u32, u32),
     preview_target: (u32, u32),
     thumbnails: thumbnails::Thumbnails,
