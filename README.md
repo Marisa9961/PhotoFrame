@@ -26,7 +26,7 @@
 
 ## 构建与运行
 
-目前支持并验证的平台为 **Windows x64**。需要 Rust stable（支持 edition 2024）、Visual Studio C++ 桌面工具链及 Windows SDK。
+目前经过桌面运行验证的平台为 **Windows x64**。Windows 构建需要 Rust stable（支持 edition 2024）、Visual Studio C++ 桌面工具链及 Windows SDK。
 
 ```powershell
 cargo build --release --locked
@@ -34,6 +34,10 @@ cargo build --release --locked
 ```
 
 GPUI 需要 Windows SDK 中的 `fxc.exe`。若无法自动找到，请将其完整路径设置为环境变量 `GPUI_FXC_PATH`。
+
+Linux x64 编译由 GitHub Actions 的 **Build and draft release** 工作流中的 `linux` 任务检查，使用 Ubuntu 24.04 构建 Release，成功后可从 Artifacts 下载包含程序与许可证的 `photo-frame-linux-x64` 压缩包。该构建不包含桌面运行测试，也不代表兼容所有 Linux 发行版。
+
+界面使用 GPUI 默认字体及系统字体回退，不附带字体文件。Linux 中文环境建议安装 `fonts-noto-cjk`；文字导出的自定义字体仍由应用内设置控制。
 
 启动后拖入照片，选择风格、调整文字，再点击“导出照片”。支持导入 JPEG、PNG、WebP、TIFF 和 BMP；暂不支持 RAW／HEIC。
 
@@ -47,7 +51,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
 ## 发布
 
-推送与 Cargo 版本一致的标签（当前为 `v1.0.0`），或在 GitHub Actions 中手动运行 **Windows draft release**。工作流会测试并构建 Windows x64 版本，将程序与许可证打包为 ZIP，上传到草稿 Release，确认后可手动发布。
+推送与 Cargo 版本一致的标签（当前为 `v1.0.0`），或在 GitHub Actions 中手动运行 **Build and draft release**。普通 push 和 pull request 不触发构建。工作流中的 `windows` 和 `linux` 任务并行运行：Windows 版本经测试后与许可证打包为 ZIP，上传到草稿 Release，确认后可手动发布；Linux 压缩包上传至 Artifacts。
 
 ## 许可
 

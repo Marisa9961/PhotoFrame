@@ -74,7 +74,7 @@ impl Render for SettingsDialog {
             }))
             .child(col().w(px(560.)).max_w_full().max_h_full().min_h_0()
                 .rounded_xl().overflow_hidden().shadow_2xl().border_1().border_color(rgb(0x49614c))
-                .bg(rgb(PANEL)).text_color(rgb(0xe7ede5)).text_sm().font_family("Microsoft YaHei")
+                .bg(rgb(PANEL)).text_color(rgb(0xe7ede5)).text_sm()
                 .child(row().px_5().py_4().justify_between().flex_shrink_0().border_b_1().border_color(rgb(LINE))
                     .child(section(tr!("settings.title")))
                     .child(div().id("close-settings").size(px(30.)).rounded_md().cursor_pointer()

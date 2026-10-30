@@ -94,7 +94,6 @@ impl Render for Studio {
             .size_full()
             .bg(rgb(BG))
             .text_color(rgb(0xe7ede5))
-            .font_family("Microsoft YaHei")
             .text_sm()
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.add(paths.paths().to_vec(), cx)

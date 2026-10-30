@@ -1,4 +1,4 @@
-name: Windows draft release
+name: Build and draft release
 
 on:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-draft-release
+  group: build-and-draft-release
   cancel-in-progress: false
 
 jobs:
-  release:
+  windows:
     runs-on: windows-2025
     timeout-minutes: 60
     permissions:
@@ -152,3 +152,52 @@ jobs:
             gh release create $tag $env:RELEASE_ZIP --repo $repo --draft --target $env:GITHUB_SHA --title "印框 · PhotoFrame $env:APP_VERSION" --notes-file $notes
           }
           if ($LASTEXITCODE -ne 0) { throw 'Draft release upload failed' }
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: '2'
+      RUSTUP_TOOLCHAIN: stable-x86_64-unknown-linux-gnu
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential pkg-config cmake clang libclang-dev \
+            libfontconfig-dev libfreetype6-dev libwayland-dev \
+            libx11-xcb-dev libxkbcommon-x11-dev libvulkan-dev
+
+      - name: Set up Rust
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build Linux x64
+        run: cargo build --release --locked
+
+      - name: Package binary and licenses
+        run: |
+          mkdir -p dist/photo-frame-linux-x64
+          cp target/release/photo-frame LICENSE THIRD_PARTY_NOTICES.md dist/photo-frame-linux-x64/
+          cp -r licenses dist/photo-frame-linux-x64/
+          tar -C dist -czf dist/photo-frame-linux-x64.tar.gz photo-frame-linux-x64
+
+      - name: Upload Linux build
+        uses: actions/upload-artifact@v7
+        with:
+          name: photo-frame-linux-x64
+          path: dist/photo-frame-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 14

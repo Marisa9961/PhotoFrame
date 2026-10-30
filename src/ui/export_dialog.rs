@@ -239,7 +239,7 @@ impl Render for ExportDialog {
             }))
             .child(col().id("export-modal").w(px(760.)).max_w_full().h_full().max_h(px(660.))
                 .min_h_0().rounded_xl().overflow_hidden().border_1().border_color(rgb(0x49614c))
-                .shadow_2xl().bg(rgb(PANEL)).text_color(rgb(0xe7ede5)).font_family("Microsoft YaHei").text_sm()
+                .shadow_2xl().bg(rgb(PANEL)).text_color(rgb(0xe7ede5)).text_sm()
                 .child(row().px_5().py_4().gap_3().flex_shrink_0().border_b_1().border_color(rgb(LINE))
                     .child(div().size(px(42.)).rounded_lg().bg(rgb(0x324a35)).text_color(rgb(ACCENT))
                         .flex().items_center().justify_center().text_size(px(23.)).child("↗"))
