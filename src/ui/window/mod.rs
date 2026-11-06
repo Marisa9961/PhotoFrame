@@ -1,3 +1,7 @@
+mod titlebar;
+
+pub(super) use titlebar::render as render_titlebar;
+
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, Decorations, Div, MouseButton, Pixels, Point, ResizeEdge,
     SharedString, Size, Stateful, Tiling, TitlebarOptions, Window, WindowBounds, WindowControlArea,

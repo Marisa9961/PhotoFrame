@@ -1,5 +1,10 @@
-use super::Studio;
-use gpui::{Context, Task};
+mod dialog;
+
+pub(super) use dialog::ExportDialog;
+
+use crate::ui::components::{ACCENT, LINE, col, label, row, section};
+use crate::ui::{Command, Studio};
+use gpui::{AnyElement, Context, FontWeight, Task, div, prelude::*, px, relative, rgb};
 use photo_frame::{
     batch::{self, BatchEvent, BatchOptions},
     settings::RenderSettings,
@@ -202,6 +207,64 @@ impl ExportSession {
 impl Drop for ExportSession {
     fn drop(&mut self) {
         self.cancel();
+    }
+}
+
+impl Studio {
+    pub(super) fn export_panel(&self, cx: &Context<Self>) -> AnyElement {
+        col()
+            .gap_2()
+            .when(!self.exports.is_running(), |d| {
+                d.child(
+                    div()
+                        .id("open-export")
+                        .h(px(46.))
+                        .w_full()
+                        .rounded_lg()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(rgb(ACCENT))
+                        .text_color(rgb(0x192a1c))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .cursor_pointer()
+                        .hover(|s| s.bg(rgb(0xd7e5cd)))
+                        .on_click(cx.listener(|this, _, window, cx| this.open_export(window, cx)))
+                        .child(tr!("export.open")),
+                )
+            })
+            .when(self.exports.is_running(), |d| {
+                d.child(
+                    row()
+                        .justify_between()
+                        .child(section(tr!("export.running")))
+                        .child(label(format!(
+                            "{} / {}",
+                            self.exports.progress().0,
+                            self.exports.progress().1
+                        ))),
+                )
+                .child(
+                    div().h(px(3.)).w_full().rounded_full().bg(rgb(LINE)).child(
+                        div()
+                            .h_full()
+                            .w(relative(
+                                self.exports.progress().0 as f32
+                                    / self.exports.progress().1.max(1) as f32,
+                            ))
+                            .rounded_full()
+                            .bg(rgb(ACCENT)),
+                    ),
+                )
+                .child(self.button(
+                    "cancel",
+                    tr!("export.stop"),
+                    false,
+                    Command::Cancel,
+                    cx,
+                ))
+            })
+            .into_any_element()
     }
 }
 

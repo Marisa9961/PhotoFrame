@@ -5,8 +5,12 @@ use std::{
     rc::Rc,
 };
 
-impl super::Studio {
-    pub(super) fn preview_zoom_slider(&self, cx: &gpui::Context<Self>) -> impl gpui::IntoElement {
+impl crate::ui::Studio {
+    pub(in crate::ui) fn preview_zoom_slider(
+        &self,
+        cx: &gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use crate::ui::components::{ACCENT, LINE};
         use gpui::{
             InteractiveElement, MouseButton, MouseDownEvent, ParentElement, Styled, canvas, div,
             rgb,
@@ -46,13 +50,13 @@ impl super::Studio {
                     .w(px(100.))
                     .h(px(4.))
                     .rounded_full()
-                    .bg(rgb(super::LINE))
+                    .bg(rgb(LINE))
                     .child(
                         div()
                             .w(px(100. * fraction))
                             .h_full()
                             .rounded_full()
-                            .bg(rgb(super::ACCENT)),
+                            .bg(rgb(ACCENT)),
                     ),
             )
             .child(
@@ -62,14 +66,14 @@ impl super::Studio {
                     .top(px(5.))
                     .size(px(12.))
                     .rounded_full()
-                    .bg(rgb(super::ACCENT)),
+                    .bg(rgb(ACCENT)),
             )
     }
 }
 
 /// View-only navigation, independent of preview generation and export settings.
 #[derive(Default)]
-pub(super) struct PreviewViewport {
+pub(in crate::ui) struct PreviewViewport {
     pub bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     slider_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     source: Option<PathBuf>,
@@ -163,7 +167,7 @@ enum Drag {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct ViewTransform {
+pub(in crate::ui) struct ViewTransform {
     pub zoom: f32,
     offset: Point<Pixels>,
 }

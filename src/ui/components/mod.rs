@@ -1,4 +1,15 @@
-use super::*;
+mod input;
+
+pub(crate) use input::init;
+pub(super) use input::{Changed, TextInput};
+
+use gpui::{prelude::*, *};
+
+pub(super) const BG: u32 = 0x101a17;
+pub(super) const PANEL: u32 = 0x19241f;
+pub(super) const LINE: u32 = 0x2d3d34;
+pub(super) const MUTED: u32 = 0x98aaa0;
+pub(super) const ACCENT: u32 = 0xc4d7b5;
 
 pub(super) fn col() -> Div {
     div().flex().flex_col()

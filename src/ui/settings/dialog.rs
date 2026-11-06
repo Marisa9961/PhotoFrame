@@ -1,14 +1,19 @@
-use super::*;
+use crate::ui::Studio;
+use crate::ui::components::{ACCENT, LINE, MUTED, PANEL, col, label, row, section};
+use crate::ui::window;
+use gpui::{prelude::*, *};
+use photo_frame::i18n::Language;
+use photo_frame::tr;
 
-pub(super) struct SettingsDialog {
+pub(in crate::ui) struct SettingsDialog {
     parent: WeakEntity<Studio>,
     language: Language,
-    pub(super) focus_handle: FocusHandle,
+    pub(in crate::ui) focus_handle: FocusHandle,
     previous_focus: Option<FocusHandle>,
 }
 
 impl SettingsDialog {
-    pub(super) fn new(
+    pub(in crate::ui) fn new(
         parent: WeakEntity<Studio>,
         language: Language,
         previous_focus: Option<FocusHandle>,
@@ -61,7 +66,7 @@ impl SettingsDialog {
 
 impl Render for SettingsDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().id("settings-overlay").absolute().inset_0().top(window_platform::titlebar_height(window)).occlude().bg(rgba(0x030a07cc))
+        div().id("settings-overlay").absolute().inset_0().top(window::titlebar_height(window)).occlude().bg(rgba(0x030a07cc))
             .flex().items_center().justify_center().p_5().track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, cx.listener(|this,_,window,cx| {
                 window.focus(&this.focus_handle); cx.stop_propagation();

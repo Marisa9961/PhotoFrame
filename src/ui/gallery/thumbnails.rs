@@ -1,4 +1,4 @@
-use super::Studio;
+use crate::ui::Studio;
 use gpui::{Context, RenderImage};
 use std::{
     collections::{BTreeSet, VecDeque},
@@ -19,7 +19,7 @@ struct Entry {
 }
 
 #[derive(Clone)]
-pub(super) struct ThumbnailJob {
+pub(in crate::ui) struct ThumbnailJob {
     pub path: PathBuf,
     cancelled: Arc<AtomicBool>,
 }
@@ -31,7 +31,7 @@ impl ThumbnailJob {
 }
 
 /// One worker, a small priority window, and an LRU bounded by retained pixel bytes.
-pub(super) struct Thumbnails {
+pub(in crate::ui) struct Thumbnails {
     entries: VecDeque<Entry>,
     bytes: usize,
     budget: usize,
@@ -174,7 +174,7 @@ impl Thumbnails {
     }
 }
 
-pub(super) fn decode(job: &ThumbnailJob) -> anyhow::Result<Option<Arc<RenderImage>>> {
+pub(in crate::ui) fn decode(job: &ThumbnailJob) -> anyhow::Result<Option<Arc<RenderImage>>> {
     if job.is_cancelled() {
         return Ok(None);
     }
@@ -195,7 +195,7 @@ pub(super) fn decode(job: &ThumbnailJob) -> anyhow::Result<Option<Arc<RenderImag
 }
 
 impl Studio {
-    pub(super) fn load_thumbnails(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn load_thumbnails(&mut self, cx: &mut Context<Self>) {
         if self.thumbnail_task.is_some() || !self.thumbnails.has_pending() {
             return;
         }

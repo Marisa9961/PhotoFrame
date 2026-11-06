@@ -14,7 +14,7 @@ struct Frame {
 
 /// Retain the displayed photo during loading. An interrupted fade queues only its latest result.
 #[derive(Default)]
-pub(super) struct PreviewDisplay {
+pub(in crate::ui) struct PreviewDisplay {
     requested: Option<PathBuf>,
     current: Option<Frame>,
     previous: Option<Frame>,
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn zoomed_outgoing_frame_stays_frozen_while_new_and_queued_frames_start_fitted() {
-        use crate::ui::preview_viewport::PreviewViewport;
+        use crate::ui::preview::viewport::PreviewViewport;
         use gpui::{Bounds, point, px, size};
 
         let mut display = PreviewDisplay::default();

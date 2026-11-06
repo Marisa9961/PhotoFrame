@@ -1,4 +1,4 @@
-use super::file_stamp::FileStamp;
+use super::FileStamp;
 use super::{Layout, Photo, load_preview};
 use crate::settings::{Background, RenderSettings};
 use crate::tr;

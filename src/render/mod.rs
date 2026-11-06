@@ -3,8 +3,6 @@ mod base;
 mod caption;
 mod effects;
 mod export;
-mod file_stamp;
-mod jpeg;
 mod layout;
 mod logo;
 mod photo;
@@ -21,9 +19,31 @@ use anyhow::{Result, bail};
 use effects::row_inset;
 use image::{DynamicImage, Pixel, Rgba, RgbaImage, imageops};
 use std::{
+    io,
+    path::Path,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
+
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    length: u64,
+    modified: Option<SystemTime>,
+}
+
+impl FileStamp {
+    fn read(path: &Path) -> io::Result<Self> {
+        let metadata = path.metadata()?;
+        Ok(Self {
+            length: metadata.len(),
+            modified: metadata.modified().ok(),
+        })
+    }
+
+    fn is_reliable(&self) -> bool {
+        self.modified.is_some()
+    }
+}
 
 /// Preview stages may overlap; their durations must not be summed as wall time.
 #[derive(Clone, Debug, Default)]
@@ -38,7 +58,7 @@ pub struct ComposeTimings {
 pub struct Engine {
     captions: caption::CaptionRenderer,
     timings: ComposeTimings,
-    jpeg: jpeg::Encoder,
+    jpeg: export::JpegEncoder,
     preview_base: Option<preview::CachedBase>,
 }
 impl Engine {

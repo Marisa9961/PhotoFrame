@@ -1,5 +1,13 @@
-use super::*;
+mod thumbnails;
+
+pub(super) use thumbnails::Thumbnails;
+
+use crate::ui::components::{ACCENT, LINE, col, label, row};
+use crate::ui::{Command, Studio};
+use gpui::{prelude::*, *};
+use photo_frame::tr;
 use std::ops::Range;
+use std::path::PathBuf;
 
 const ITEM_WIDTH: f32 = 126.;
 const ITEM_STRIDE: f32 = ITEM_WIDTH + 12.;

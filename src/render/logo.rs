@@ -1,4 +1,4 @@
-use super::file_stamp::FileStamp;
+use super::FileStamp;
 use crate::tr;
 use anyhow::{Context, Result};
 use image::RgbaImage;

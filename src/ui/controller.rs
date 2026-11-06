@@ -1,4 +1,16 @@
-use super::*;
+use crate::ui::components::{Changed, TextInput, hex, parse_color};
+use crate::ui::{Command, FileChoice, PanelSection, Studio, ToggleField};
+use crate::ui::{
+    export::{ExportDialog, ExportSession},
+    gallery::Thumbnails,
+    preview::{PreviewCoordinator, PreviewTrigger},
+    settings::SettingsDialog,
+};
+use gpui::{prelude::*, *};
+use photo_frame::settings::{Settings, StyleNumber, StylePreset};
+use photo_frame::tr;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 impl Studio {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -52,9 +64,9 @@ impl Studio {
             settings,
             photos: Arc::default(),
             selected: 0,
-            preview: preview_coordinator::PreviewCoordinator::default(),
-            exports: export_session::ExportSession::default(),
-            thumbnails: thumbnails::Thumbnails::default(),
+            preview: PreviewCoordinator::default(),
+            exports: ExportSession::default(),
+            thumbnails: Thumbnails::default(),
             thumbnail_task: None,
             filmstrip_scroll: ScrollHandle::new(),
             filmstrip_width: 0.,

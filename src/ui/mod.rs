@@ -1,39 +1,23 @@
+mod components;
 mod controller;
-mod export_dialog;
-mod export_session;
-mod filmstrip;
-mod input;
-mod panels;
+mod export;
+mod gallery;
 mod preview;
-mod preview_coordinator;
-mod preview_display;
-mod preview_viewport;
-mod settings_dialog;
-mod thumbnails;
-mod titlebar;
+mod settings;
 mod view;
-mod widgets;
-mod window_platform;
-pub(crate) use window_platform::window_options;
+mod window;
 
-use export_dialog::ExportDialog;
-use gpui::{prelude::*, *};
-pub(crate) use input::init;
-use input::{Changed, TextInput};
-use photo_frame::settings::{
-    Background, ExportNumber, Format, Ratio, Settings, StyleNumber, StylePreset,
-};
-use photo_frame::{i18n::Language, tr};
-use preview::PreviewTrigger;
-use settings_dialog::SettingsDialog;
+pub(crate) use components::init;
+pub(crate) use window::window_options;
+
+use components::TextInput;
+use export::{ExportDialog, ExportSession};
+use gallery::Thumbnails;
+use gpui::{Entity, ScrollHandle, Subscription, Task};
+use photo_frame::settings::{Background, Ratio, Settings, StyleNumber, StylePreset};
+use preview::PreviewCoordinator;
+use settings::SettingsDialog;
 use std::{path::PathBuf, sync::Arc};
-use widgets::*;
-
-const BG: u32 = 0x101a17;
-const PANEL: u32 = 0x19241f;
-const LINE: u32 = 0x2d3d34;
-const MUTED: u32 = 0x98aaa0;
-const ACCENT: u32 = 0xc4d7b5;
 
 pub struct Studio {
     settings: Settings,
@@ -41,9 +25,9 @@ pub struct Studio {
     preference_error: Option<String>,
     photos: Arc<Vec<PathBuf>>,
     selected: usize,
-    preview: preview_coordinator::PreviewCoordinator,
-    exports: export_session::ExportSession,
-    thumbnails: thumbnails::Thumbnails,
+    preview: PreviewCoordinator,
+    exports: ExportSession,
+    thumbnails: Thumbnails,
     thumbnail_task: Option<Task<()>>,
     filmstrip_scroll: ScrollHandle,
     filmstrip_width: f32,

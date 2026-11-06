@@ -1,19 +1,17 @@
-use super::{
-    ACCENT, BG, LINE, MUTED, PANEL,
-    window_platform::{self, Control},
-};
+use super::{Control, bind_button, bind_drag_area, titlebar_height};
+use crate::ui::components::{ACCENT, BG, LINE, MUTED, PANEL};
 use gpui::{
     AnyElement, App, Context, PathBuilder, Render, SharedString, Window, canvas, div, point,
     prelude::*, px, rgb,
 };
 use photo_frame::tr;
 
-pub(super) fn render(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
-    if window_platform::titlebar_height(window) == px(0.) {
+pub(in crate::ui) fn render(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+    if titlebar_height(window) == px(0.) {
         return None;
     }
     let controls = window.window_controls();
-    let drag_area = window_platform::bind_drag_area(
+    let drag_area = bind_drag_area(
         div()
             .id("window-drag-area")
             .relative()
@@ -35,7 +33,7 @@ pub(super) fn render(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
             .id("window-titlebar")
             .relative()
             .flex()
-            .h(window_platform::titlebar_height(window))
+            .h(titlebar_height(window))
             .flex_shrink_0()
             .bg(rgb(PANEL))
             // Paint the separator behind the buttons so hover fills their entire height.
@@ -83,7 +81,7 @@ fn button(control: Control, window: &Window) -> impl IntoElement {
                 _ => 0x34483b,
             }))
         })
-        .map(|button| window_platform::bind_button(button, control, window))
+        .map(|button| bind_button(button, control, window))
         .tooltip(move |_, cx| cx.new(|_| ControlTooltip(label.clone().into())).into())
         .child(
             canvas(

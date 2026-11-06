@@ -1,12 +1,20 @@
-use super::*;
+use crate::ui::Studio;
+use crate::ui::components::{
+    ACCENT, LINE, MUTED, PANEL, col, label, panel_card, panel_heading, row,
+};
+use crate::ui::window;
+use gpui::{prelude::*, *};
+use photo_frame::settings::{ExportNumber, Format, Settings};
+use photo_frame::tr;
+use std::path::PathBuf;
 
-pub(super) struct ExportDialog {
+pub(in crate::ui) struct ExportDialog {
     parent: WeakEntity<Studio>,
     settings: ExportDraft,
     count: usize,
     all: bool,
     error: String,
-    pub(super) focus_handle: FocusHandle,
+    pub(in crate::ui) focus_handle: FocusHandle,
     previous_focus: Option<FocusHandle>,
 }
 
@@ -31,7 +39,7 @@ enum Action {
 }
 
 impl ExportDialog {
-    pub(super) fn new(
+    pub(in crate::ui) fn new(
         parent: WeakEntity<Studio>,
         settings: &Settings,
         count: usize,
@@ -239,7 +247,7 @@ impl Render for ExportDialog {
             Format::Png => "PNG",
             Format::Webp => "WebP",
         };
-        div().id("export-modal-overlay").absolute().inset_0().top(window_platform::titlebar_height(window)).occlude()
+        div().id("export-modal-overlay").absolute().inset_0().top(window::titlebar_height(window)).occlude()
             .bg(rgba(0x030a07cc)).flex().items_center().justify_center().p_5()
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
