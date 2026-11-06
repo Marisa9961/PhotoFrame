@@ -16,15 +16,7 @@ fn main() {
         .detach();
         let bounds = Bounds::centered(None, size(px(1360.), px(900.)), cx);
         cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(1060.), px(680.))),
-                titlebar: Some(TitlebarOptions {
-                    title: Some(tr!("app.name").into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
+            ui::window_options(bounds, tr!("app.name").into()),
             |window, cx| {
                 let studio = cx.new(ui::Studio::new);
                 window.set_window_title(&tr!("app.name"));

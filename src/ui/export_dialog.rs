@@ -227,7 +227,7 @@ impl ExportDialog {
 }
 
 impl Render for ExportDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ready = self.count > 0 && self.settings.output.is_some();
         let total = if self.all {
             self.count
@@ -239,7 +239,7 @@ impl Render for ExportDialog {
             Format::Png => "PNG",
             Format::Webp => "WebP",
         };
-        div().id("export-modal-overlay").absolute().inset_0().occlude()
+        div().id("export-modal-overlay").absolute().inset_0().top(window_platform::titlebar_height(window)).occlude()
             .bg(rgba(0x030a07cc)).flex().items_center().justify_center().p_5()
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {

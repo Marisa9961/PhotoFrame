@@ -60,8 +60,8 @@ impl SettingsDialog {
 }
 
 impl Render for SettingsDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().id("settings-overlay").absolute().inset_0().occlude().bg(rgba(0x030a07cc))
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().id("settings-overlay").absolute().inset_0().top(window_platform::titlebar_height(window)).occlude().bg(rgba(0x030a07cc))
             .flex().items_center().justify_center().p_5().track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, cx.listener(|this,_,window,cx| {
                 window.focus(&this.focus_handle); cx.stop_propagation();

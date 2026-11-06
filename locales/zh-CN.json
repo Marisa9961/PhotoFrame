@@ -1,6 +1,10 @@
 {
   "_version": 1,
   "app.name": "印框 · PhotoFrame",
+  "window.minimize": "最小化",
+  "window.maximize": "最大化",
+  "window.restore": "还原",
+  "window.close": "关闭",
   "errors.window": "无法创建 GPUI 窗口",
   "preview.import": "点击此处导入照片",
   "preview.loading": "正在生成预览",

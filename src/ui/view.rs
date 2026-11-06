@@ -2,6 +2,8 @@ use super::*;
 
 impl Render for Studio {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let titlebar = titlebar::render(window, cx);
+        let resize_handles = window_platform::resize_handles(window);
         let filmstrip = self.filmstrip(window, cx);
         let now = std::time::Instant::now();
         self.preview.display.advance(now);
@@ -99,6 +101,7 @@ impl Render for Studio {
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.add(paths.paths().to_vec(), cx)
             }))
+            .when_some(titlebar, |view, titlebar| view.child(titlebar))
             .child(
                 row()
                     .items_start()
@@ -329,6 +332,7 @@ impl Render for Studio {
             )
             .when_some(self.export_dialog.clone(), |d, dialog| d.child(dialog))
             .when_some(self.settings_dialog.clone(), |d, dialog| d.child(dialog))
+            .children(resize_handles)
     }
 }
 

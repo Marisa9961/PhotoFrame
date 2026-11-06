@@ -1,6 +1,10 @@
 {
   "_version": 1,
   "app.name": "PhotoFrame",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close",
   "errors.window": "Unable to create the application window",
   "preview.import": "Click to import photos",
   "preview.loading": "Generating preview",

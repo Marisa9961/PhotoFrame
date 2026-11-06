@@ -9,8 +9,11 @@ mod preview_coordinator;
 mod preview_display;
 mod settings_dialog;
 mod thumbnails;
+mod titlebar;
 mod view;
 mod widgets;
+mod window_platform;
+pub(crate) use window_platform::window_options;
 
 use export_dialog::ExportDialog;
 use gpui::{prelude::*, *};
