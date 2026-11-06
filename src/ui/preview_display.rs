@@ -81,6 +81,10 @@ impl PreviewDisplay {
         }
     }
 
+    pub fn source(&self) -> Option<&Path> {
+        self.current.as_ref().map(|frame| frame.source.as_path())
+    }
+
     pub fn image(&self) -> Option<&Arc<RenderImage>> {
         self.current.as_ref().map(|frame| &frame.image)
     }
@@ -160,6 +164,51 @@ mod tests {
         assert!(!display.is_animating());
         assert!(display.previous().is_none());
         assert_eq!(display.take_retired()[0].id, a.id);
+    }
+
+    #[test]
+    fn zoomed_outgoing_frame_stays_frozen_while_new_and_queued_frames_start_fitted() {
+        use crate::ui::preview_viewport::PreviewViewport;
+        use gpui::{Bounds, point, px, size};
+
+        let mut display = PreviewDisplay::default();
+        let mut view = PreviewViewport::default();
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(800.), px(600.)));
+        let image_size = size(1200u32.into(), 900u32.into());
+        view.bounds.set(Some(bounds));
+        let start = Instant::now();
+        ready(&mut display, "a.jpg", start);
+        display.advance(start + FADE_DURATION);
+        view.sync_source(display.source());
+        view.zoom(bounds.center(), 400., image_size);
+        let outgoing = view.transform.image_bounds(bounds, image_size);
+
+        display.select(Path::new("b.jpg"));
+        view.sync_source(display.source());
+        assert_eq!(view.transform.image_bounds(bounds, image_size), outgoing);
+
+        let now = start + FADE_DURATION;
+        ready(&mut display, "b.jpg", now);
+        view.sync_source(display.source());
+        assert_eq!(view.transform.zoom, 1.);
+        assert_eq!(
+            view.previous_transform.image_bounds(bounds, image_size),
+            outgoing
+        );
+        view.zoom(bounds.center(), 200., image_size);
+        let b = view.transform.image_bounds(bounds, image_size);
+        assert_eq!(
+            view.previous_transform.image_bounds(bounds, image_size),
+            outgoing
+        );
+
+        ready(&mut display, "c.jpg", now + FADE_DURATION / 2);
+        view.sync_source(display.source());
+        assert_eq!(view.transform.image_bounds(bounds, image_size), b);
+        display.advance(now + FADE_DURATION);
+        view.sync_source(display.source());
+        assert_eq!(view.transform.zoom, 1.);
+        assert_eq!(view.previous_transform.image_bounds(bounds, image_size), b);
     }
 
     #[test]

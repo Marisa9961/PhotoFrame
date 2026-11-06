@@ -7,6 +7,9 @@ impl Render for Studio {
         let filmstrip = self.filmstrip(window, cx);
         let now = std::time::Instant::now();
         self.preview.display.advance(now);
+        self.preview
+            .viewport
+            .sync_source(self.preview.display.source());
         for image in self.preview.display.take_retired() {
             let _ = window.drop_image(image);
         }
@@ -20,8 +23,12 @@ impl Render for Studio {
         let empty = self.photos.is_empty();
         let previous_target = self.preview.target();
         let preview_owner = cx.entity().downgrade();
+        let viewport_bounds = self.preview.viewport.bounds.clone();
+        let transform = self.preview.viewport.transform;
+        let previous_transform = self.preview.viewport.previous_transform;
         let preview_observer = canvas(
             move |bounds, window, _| {
+                viewport_bounds.set(Some(bounds));
                 let target = preview_pixels(
                     f32::from(bounds.size.width),
                     f32::from(bounds.size.height),
@@ -62,9 +69,11 @@ impl Render for Studio {
                 .overflow_hidden()
                 .when_some(
                     self.preview.display.previous().cloned(),
-                    |layer, previous| layer.child(preview_layer(previous, 1. - opacity)),
+                    |layer, previous| {
+                        layer.child(preview_layer(previous, 1. - opacity, previous_transform))
+                    },
                 )
-                .child(preview_layer(image, opacity))
+                .child(preview_layer(image, opacity, transform))
                 .into_any_element()
         } else {
             col()
@@ -98,6 +107,29 @@ impl Render for Studio {
             .bg(rgb(BG))
             .text_color(rgb(0xe7ede5))
             .text_sm()
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                if let Some(image) = this.preview.display.image()
+                    && this.preview.viewport.move_pointer(
+                        event.position,
+                        event.dragging(),
+                        image.size(0),
+                    )
+                {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| {
+                    this.preview.viewport.release();
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| {
+                    this.preview.viewport.release();
+                }),
+            )
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.add(paths.paths().to_vec(), cx)
             }))
@@ -121,15 +153,58 @@ impl Render for Studio {
                                     .child(
                                         row()
                                             .h(px(22.))
+                                            .gap_3()
                                             .justify_between()
-                                            .child(div().overflow_hidden().child(title))
-                                            .child(label(if self.preview.is_rendering() {
-                                                tr!("preview.updating")
-                                            } else if empty {
-                                                String::new()
-                                            } else {
-                                                tr!("preview.title")
-                                            })),
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .overflow_hidden()
+                                                    .child(title),
+                                            )
+                                            .child(
+                                                row()
+                                                    .flex_shrink_0()
+                                                    .gap_3()
+                                                    .items_center()
+                                                    .child(label(if self.preview.is_rendering() {
+                                                        tr!("preview.updating")
+                                                    } else if empty {
+                                                        String::new()
+                                                    } else {
+                                                        tr!("preview.title")
+                                                    }))
+                                                    .when(
+                                                        self.preview.display.image().is_some(),
+                                                        |d| {
+                                                            d.child(self.preview_zoom_slider(cx))
+                                                                .child(label(format!(
+                                                                    "{:.2}×",
+                                                                    transform.zoom
+                                                                )))
+                                                                .child(
+                                                                    div()
+                                                                        .id("preview-fit")
+                                                                        .px_2()
+                                                                        .rounded_sm()
+                                                                        .text_color(rgb(if transform.zoom > 1. {
+                                                                            ACCENT
+                                                                        } else {
+                                                                            MUTED
+                                                                        }))
+                                                                        .when(transform.zoom > 1., |d| {
+                                                                            d.cursor_pointer()
+                                                                                .hover(|s| s.bg(rgb(LINE)))
+                                                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                                                    this.preview.viewport.reset();
+                                                                                    cx.notify();
+                                                                                }))
+                                                                        })
+                                                                        .child(tr!("preview.fit")),
+                                                                )
+                                                        },
+                                                    ),
+                                            ),
                                     )
                                     .child(
                                         div()
@@ -150,6 +225,38 @@ impl Render for Studio {
                                                 d.cursor_pointer().hover(|s| {
                                                     s.bg(rgb(0x17291e)).border_color(rgb(ACCENT))
                                                 })
+                                            })
+                                            .on_scroll_wheel(cx.listener(
+                                                |this, event: &ScrollWheelEvent, _, cx| {
+                                                    if let Some(image) =
+                                                        this.preview.display.image()
+                                                    {
+                                                        this.preview.viewport.zoom(
+                                                            event.position,
+                                                            f32::from(
+                                                                event.delta.pixel_delta(px(40.)).y,
+                                                            ),
+                                                            image.size(0),
+                                                        );
+                                                        cx.stop_propagation();
+                                                        cx.notify();
+                                                    }
+                                                },
+                                            ))
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(
+                                                    |this, event: &MouseDownEvent, _, _| {
+                                                        if this.preview.display.image().is_some() {
+                                                            this.preview
+                                                                .viewport
+                                                                .press(event.position);
+                                                        }
+                                                    },
+                                                ),
+                                            )
+                                            .when(transform.zoom > 1., |d| {
+                                                d.cursor(CursorStyle::OpenHand)
                                             })
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 if this.photos.is_empty() {
@@ -336,10 +443,14 @@ impl Render for Studio {
     }
 }
 
-fn preview_layer(image: Arc<RenderImage>, opacity: f32) -> Div {
+fn preview_layer(
+    image: Arc<RenderImage>,
+    opacity: f32,
+    transform: super::preview_viewport::ViewTransform,
+) -> Div {
     let image_size = image.size(0);
     let image = canvas(
-        move |bounds, _, _| preview_image_bounds(bounds, image_size),
+        move |bounds, _, _| transform.image_bounds(bounds, image_size),
         move |bounds, fitted, window, _| {
             if let Some(fitted) = fitted {
                 window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -361,14 +472,12 @@ fn preview_layer(image: Arc<RenderImage>, opacity: f32) -> Div {
         .child(image)
 }
 
+#[cfg(test)]
 fn preview_image_bounds(
     viewport: Bounds<Pixels>,
     image_size: Size<DevicePixels>,
 ) -> Option<Bounds<Pixels>> {
-    if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
-        return None;
-    }
-    Some(ObjectFit::Contain.get_bounds(viewport, image_size))
+    super::preview_viewport::ViewTransform::default().image_bounds(viewport, image_size)
 }
 
 // A multiple of the decoded-photo cache's 512 px buckets keeps requests within this cap.

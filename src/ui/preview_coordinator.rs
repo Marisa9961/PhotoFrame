@@ -20,6 +20,7 @@ use std::{
 #[derive(Default)]
 pub(super) struct PreviewCoordinator {
     pub display: PreviewDisplay,
+    pub viewport: super::preview_viewport::PreviewViewport,
     target: (u32, u32),
     rendering: bool,
     state: Arc<Mutex<Option<PreviewState>>>,

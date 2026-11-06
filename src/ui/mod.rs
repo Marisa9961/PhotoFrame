@@ -7,6 +7,7 @@ mod panels;
 mod preview;
 mod preview_coordinator;
 mod preview_display;
+mod preview_viewport;
 mod settings_dialog;
 mod thumbnails;
 mod titlebar;

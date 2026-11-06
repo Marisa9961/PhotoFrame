@@ -12,6 +12,7 @@
   "preview.drop_hint": "也可以拖入照片 · 支持多选",
   "preview.switch_hint": "可在下方切换照片",
   "preview.updating": "更新中…",
+  "preview.fit": "适应窗口",
   "preview.title": "预览",
   "photos.remove": "移除当前",
   "photos.clear": "清空",
