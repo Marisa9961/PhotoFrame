@@ -1,6 +1,6 @@
 [package]
 name = "photo-frame"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "Rust + GPUI 原生照片印框工具"
 authors = ["Marisa9961"]

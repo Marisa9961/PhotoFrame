@@ -55,7 +55,7 @@ cargo clippy --all-targets --locked -- -D warnings
 
 ## 发布
 
-推送与 Cargo 版本一致的标签（当前为 `v1.0.0`），或在 GitHub Actions 中手动运行 **Build and draft release**。普通 push 和 pull request 不触发构建。Windows、Linux 和 macOS 构建并行运行，分别打包为 Windows ZIP、Linux TAR.GZ 和 macOS arm64 TAR.GZ；各平台产物上传至 Artifacts，全部成功后一起上传到草稿 Release，确认后可手动发布。
+推送与 Cargo 版本一致的标签（当前为 `v1.1.0`），或在 GitHub Actions 中手动运行 **Build and draft release**。普通 push 和 pull request 不触发构建。Windows、Linux 和 macOS 构建并行运行，分别打包为 Windows ZIP、Linux TAR.GZ 和 macOS arm64 TAR.GZ；各平台产物上传至 Artifacts，全部成功后一起上传到草稿 Release，确认后可手动发布。
 
 ## 许可
 
