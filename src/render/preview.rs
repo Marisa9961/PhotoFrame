@@ -1,5 +1,6 @@
+use super::file_stamp::FileStamp;
 use super::{Layout, Photo, load_preview};
-use crate::settings::{Background, Settings};
+use crate::settings::{Background, RenderSettings};
 use crate::tr;
 use anyhow::Result;
 use image::RgbaImage;
@@ -7,7 +8,6 @@ use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
-    time::SystemTime,
 };
 
 // One caption-free canvas, bounded independently of the decoded-photo LRU.
@@ -25,15 +25,15 @@ pub(super) struct BaseKey {
 }
 
 impl BaseKey {
-    pub fn new(layout: &Layout, settings: &Settings) -> Self {
+    pub fn new(layout: &Layout, settings: &RenderSettings) -> Self {
         Self {
             layout: layout.clone(),
-            background: settings.background,
-            color: settings.color,
-            blur: settings.blur,
-            dim: settings.background_dim,
-            radius: settings.radius,
-            shadow: settings.shadow,
+            background: settings.style.background,
+            color: settings.style.color,
+            blur: settings.style.blur,
+            dim: settings.style.background_dim,
+            radius: settings.style.radius,
+            shadow: settings.style.shadow,
         }
     }
 }
@@ -45,24 +45,9 @@ pub(super) struct CachedBase {
     pub pixels: RgbaImage,
 }
 
-#[derive(PartialEq)]
-struct Stamp {
-    length: u64,
-    modified: Option<SystemTime>,
-}
-impl Stamp {
-    fn read(path: &Path) -> Result<Self> {
-        let metadata = path.metadata()?;
-        Ok(Self {
-            length: metadata.len(),
-            modified: metadata.modified().ok(),
-        })
-    }
-}
-
 struct Entry {
     path: PathBuf,
-    stamp: Stamp,
+    stamp: FileStamp,
     edge: u32,
     photo: Arc<Photo>,
 }
@@ -89,7 +74,7 @@ impl PreviewCache {
 
     pub fn load(&mut self, path: &Path, edge: u32) -> Result<Arc<Photo>> {
         anyhow::ensure!(edge > 0, tr!("errors.preview_size"));
-        let stamp = Stamp::read(path)?;
+        let stamp = FileStamp::read(path)?;
         // Buckets prevent repeated decoding while the window is resized a few pixels.
         let edge = edge.div_ceil(512).saturating_mul(512);
         if let Some(index) = self.entries.iter().position(|entry| entry.path == path) {
@@ -105,7 +90,7 @@ impl PreviewCache {
         let photo = Arc::new(load_preview(path, edge)?);
         let bytes = photo.image.as_bytes().len();
         // Never retain an oversized image, or a snapshot modified during decoding.
-        if bytes <= self.budget && Stamp::read(path)? == stamp {
+        if bytes <= self.budget && FileStamp::read(path)? == stamp {
             while self.bytes + bytes > self.budget || self.entries.len() >= 16 {
                 let entry = self.entries.pop_front().unwrap();
                 self.bytes -= entry.photo.image.as_bytes().len();

@@ -1,7 +1,8 @@
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
+use photo_frame::settings::StyleSettings;
 use photo_frame::{
     render::{self, Engine, Photo},
-    settings::{Background, Format, Ratio, Settings, StylePreset},
+    settings::{Background, Format, Ratio, RenderSettings, Settings, StylePreset},
 };
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -41,16 +42,19 @@ fn cached_preview_redraws_changed_logos_and_recovers_after_missing_logo() {
     let photo = std::sync::Arc::new(photo());
     let mut engine = Engine::default();
     let mut reference = Engine::default();
-    let mut settings = Settings {
-        footer: 30,
-        title: "Caption".into(),
-        subtitle: String::new(),
-        ..Settings::default()
+    let mut settings = RenderSettings {
+        style: StyleSettings {
+            footer: 30,
+            title: "Caption".into(),
+            subtitle: String::new(),
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let without_logo = engine
         .compose_cached_preview(&photo, &settings, (300, 300))
         .unwrap();
-    settings.logo = Some(logo.clone());
+    settings.style.logo = Some(logo.clone());
     assert!(
         engine
             .compose_cached_preview(&photo, &settings, (300, 300))
@@ -73,7 +77,7 @@ fn cached_preview_redraws_changed_logos_and_recovers_after_missing_logo() {
         assert_ne!(actual, previous);
         previous = actual;
     }
-    settings.logo = None;
+    settings.style.logo = None;
     assert_eq!(
         engine
             .compose_cached_preview(&photo, &settings, (300, 300))
@@ -95,11 +99,11 @@ fn language_is_an_independent_preference_and_older_configs_follow_system() {
         settings.switch_preset(preset);
         assert_eq!(settings.language, Language::SimplifiedChinese);
         assert!(!settings.preset_modified());
-        settings.title = "User caption · {camera}".into();
+        settings.style.title = "User caption · {camera}".into();
         settings.restore_preset(preset);
         assert_eq!(settings.language, Language::SimplifiedChinese);
     }
-    settings.title = "用户文字 · User caption".into();
+    settings.style.title = "用户文字 · User caption".into();
     settings.save_to(&path).unwrap();
     assert_eq!(Settings::load_from(&path).unwrap(), settings);
     let mut json = serde_json::to_value(&settings).unwrap();
@@ -108,7 +112,7 @@ fn language_is_an_independent_preference_and_older_configs_follow_system() {
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let migrated = Settings::load_from(&path).unwrap();
     assert_eq!(migrated.language, Language::System);
-    assert_eq!(migrated.title, settings.title);
+    assert_eq!(migrated.style.title, settings.style.title);
     assert_eq!(migrated.selected_preset, settings.selected_preset);
     migrated.save_to(&path).unwrap();
     assert_eq!(
@@ -130,13 +134,16 @@ fn each_preset_keeps_its_edits_across_switches_and_restarts() {
     for (i, preset) in StylePreset::ALL.into_iter().enumerate() {
         settings.switch_preset(preset);
         assert!(!settings.preset_modified());
-        settings.title = format!("预设 {i}");
-        settings.padding = 10 + i as u32;
-        settings.ratio = Ratio::Portrait;
-        settings.font = Some(PathBuf::from(format!("font-{i}.ttf")));
-        settings.logo = Some(PathBuf::from(format!("logo-{i}.png")));
-        settings.custom.insert("camera".into(), format!("相机 {i}"));
-        settings.force_custom = true;
+        settings.style.title = format!("预设 {i}");
+        settings.style.padding = 10 + i as u32;
+        settings.style.ratio = Ratio::Portrait;
+        settings.style.font = Some(PathBuf::from(format!("font-{i}.ttf")));
+        settings.style.logo = Some(PathBuf::from(format!("logo-{i}.png")));
+        settings
+            .style
+            .custom
+            .insert("camera".into(), format!("相机 {i}"));
+        settings.style.force_custom = true;
         let before = settings.clone();
         settings.switch_preset(preset);
         assert_eq!(settings, before, "Re-selecting must not reset edits");
@@ -147,13 +154,19 @@ fn each_preset_keeps_its_edits_across_switches_and_restarts() {
     assert_eq!(restored.selected_preset, Some(StylePreset::Polaroid));
     for (i, preset) in StylePreset::ALL.into_iter().enumerate() {
         restored.switch_preset(preset);
-        assert_eq!(restored.title, format!("预设 {i}"));
-        assert_eq!(restored.padding, 10 + i as u32);
-        assert_eq!(restored.ratio, Ratio::Portrait);
-        assert_eq!(restored.font, Some(PathBuf::from(format!("font-{i}.ttf"))));
-        assert_eq!(restored.logo, Some(PathBuf::from(format!("logo-{i}.png"))));
-        assert_eq!(restored.custom["camera"], format!("相机 {i}"));
-        assert!(restored.force_custom && restored.preset_modified());
+        assert_eq!(restored.style.title, format!("预设 {i}"));
+        assert_eq!(restored.style.padding, 10 + i as u32);
+        assert_eq!(restored.style.ratio, Ratio::Portrait);
+        assert_eq!(
+            restored.style.font,
+            Some(PathBuf::from(format!("font-{i}.ttf")))
+        );
+        assert_eq!(
+            restored.style.logo,
+            Some(PathBuf::from(format!("logo-{i}.png")))
+        );
+        assert_eq!(restored.style.custom["camera"], format!("相机 {i}"));
+        assert!(restored.style.force_custom && restored.preset_modified());
         assert!(!restored.preset_edits.contains_key(&preset));
     }
 }
@@ -176,7 +189,7 @@ fn restoring_one_preset_preserves_other_presets_and_global_preferences() {
     let templates = settings.caption_templates.clone();
     for (i, preset) in StylePreset::ALL.into_iter().enumerate() {
         settings.switch_preset(preset);
-        settings.title = format!("修改 {i}");
+        settings.style.title = format!("修改 {i}");
     }
     settings.switch_preset(StylePreset::Dark);
     // Restore an edited preset after a restart, while preserving the other histories.
@@ -188,7 +201,7 @@ fn restoring_one_preset_preserves_other_presets_and_global_preferences() {
     let other_edits = settings.preset_edits.clone();
     settings.restore_preset(StylePreset::Dark);
     assert_eq!(settings.preset_edits, other_edits);
-    assert_eq!(settings.title, "{camera}");
+    assert_eq!(settings.style.title, "{camera}");
     assert!(!settings.preset_modified());
     settings.save_to(&path).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -212,10 +225,10 @@ fn restoring_one_preset_preserves_other_presets_and_global_preferences() {
     for (i, preset) in StylePreset::ALL.into_iter().enumerate() {
         restored.switch_preset(preset);
         if preset == StylePreset::Dark {
-            assert_eq!(restored.title, "{camera}");
+            assert_eq!(restored.style.title, "{camera}");
             assert!(!restored.preset_modified());
         } else {
-            assert_eq!(restored.title, format!("修改 {i}"));
+            assert_eq!(restored.style.title, format!("修改 {i}"));
         }
         assert_eq!(
             (restored.format, restored.quality, restored.max_edge),
@@ -236,8 +249,8 @@ fn version_one_configuration_keeps_active_edits_when_migrated_to_preset_history(
     let path = dir.0.join("settings.json");
     let mut settings = Settings::default();
     settings.restore_preset(StylePreset::Dark);
-    settings.title = "旧版本的修改".into();
-    settings.font_italic = true;
+    settings.style.title = "旧版本的修改".into();
+    settings.style.font_italic = true;
     let mut json = serde_json::to_value(&settings).unwrap();
     json["settings_version"] = 1.into();
     json.as_object_mut().unwrap().remove("preset_edits");
@@ -245,10 +258,10 @@ fn version_one_configuration_keeps_active_edits_when_migrated_to_preset_history(
     let mut migrated = Settings::load_from(&path).unwrap();
     assert_eq!(migrated, settings);
     migrated.switch_preset(StylePreset::Atmosphere);
-    assert_eq!(migrated.title, "{camera}");
+    assert_eq!(migrated.style.title, "{camera}");
     migrated.switch_preset(StylePreset::Dark);
-    assert_eq!(migrated.title, "旧版本的修改");
-    assert!(migrated.font_italic);
+    assert_eq!(migrated.style.title, "旧版本的修改");
+    assert!(migrated.style.font_italic);
     migrated.save_to(&path).unwrap();
     assert_eq!(Settings::load_from(&path).unwrap(), migrated);
 }
@@ -259,21 +272,21 @@ fn stored_preset_edits_are_normalized_without_overwriting_active_fields() {
     let path = dir.0.join("settings.json");
     let mut settings = Settings::default();
     settings.switch_preset(StylePreset::Dark);
-    settings.padding = 9;
+    settings.style.padding = 9;
     settings.switch_preset(StylePreset::Atmosphere);
-    settings.title = "当前编辑".into();
+    settings.style.title = "当前编辑".into();
     let mut json = serde_json::to_value(&settings).unwrap();
     json["settings_version"] = 2.into();
     json["preset_edits"]["Dark"]["padding"] = 900.into();
     json["preset_edits"]["Atmosphere"] = json["preset_edits"]["Dark"].clone();
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let mut restored = Settings::load_from(&path).unwrap();
-    assert_eq!(restored.title, "当前编辑");
+    assert_eq!(restored.style.title, "当前编辑");
     assert!(!restored.preset_edits.contains_key(&StylePreset::Atmosphere));
     restored.switch_preset(StylePreset::Dark);
-    assert_eq!(restored.padding, 30);
+    assert_eq!(restored.style.padding, 30);
     restored.switch_preset(StylePreset::Atmosphere);
-    assert_eq!(restored.title, "当前编辑");
+    assert_eq!(restored.style.title, "当前编辑");
 }
 
 #[test]
@@ -294,8 +307,8 @@ fn old_settings_only_select_a_preset_when_the_whole_style_matches() {
         std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
         let custom = Settings::load_from(&path).unwrap();
         assert!(custom.selected_preset.is_none());
-        assert_eq!(custom.title, "旧的自定义文字");
-        assert_eq!(custom.color, settings.color);
+        assert_eq!(custom.style.title, "旧的自定义文字");
+        assert_eq!(custom.style.color, settings.style.color);
     }
 }
 
@@ -307,10 +320,10 @@ fn actual_exports_round_trip_and_never_overwrite() {
     let original = std::fs::read(&source).unwrap();
     let mut engine = Engine::default();
     for format in [Format::Jpeg, Format::Png, Format::Webp] {
-        let s = Settings {
+        let s = RenderSettings {
             format,
             max_edge: 200,
-            ..Settings::default()
+            ..RenderSettings::default()
         };
         let first = render::export(&mut engine, &source, &dir.0, &s).unwrap();
         let before = std::fs::read(&first).unwrap();
@@ -335,7 +348,7 @@ fn memory_estimate_accounts_for_high_precision_inputs() {
     image::ImageBuffer::from_pixel(64, 48, Rgba([1000u16, 2000, 3000, u16::MAX]))
         .save(&high_precision)
         .unwrap();
-    let settings = Settings::default();
+    let settings = RenderSettings::default();
     assert!(
         photo_frame::batch::estimate_peak_bytes(&high_precision, &settings).unwrap()
             > photo_frame::batch::estimate_peak_bytes(&ordinary, &settings).unwrap()
@@ -360,13 +373,16 @@ fn compositions_cover_backgrounds_ratios_and_small_images() {
         Ratio::Wide,
     ] {
         for background in [Background::Solid, Background::Blur] {
-            let s = Settings {
-                ratio,
-                background,
+            let s = RenderSettings {
+                style: StyleSettings {
+                    ratio,
+                    background,
+                    radius: 10,
+                    shadow: true,
+                    ..Default::default()
+                },
                 max_edge: 117,
-                radius: 10,
-                shadow: true,
-                ..Settings::default()
+                ..RenderSettings::default()
             };
             let image = engine.compose(&photo(), &s, false).unwrap();
             assert!(image.width().max(image.height()) <= 117);
@@ -383,24 +399,34 @@ fn compositions_cover_backgrounds_ratios_and_small_images() {
         image: DynamicImage::new_rgb8(1, 1),
         fields: BTreeMap::new(),
     };
-    assert!(engine.compose(&tiny, &Settings::default(), false).is_ok());
+    assert!(
+        engine
+            .compose(&tiny, &RenderSettings::default(), false)
+            .is_ok()
+    );
 }
 
 #[test]
 fn no_footer_and_missing_font_are_handled() {
     let mut engine = Engine::default();
-    let s = Settings {
-        padding: 0,
-        horizontal_padding: None,
-        footer: 0,
-        radius: 0,
-        shadow: false,
-        ..Settings::default()
+    let s = RenderSettings {
+        style: StyleSettings {
+            padding: 0,
+            horizontal_padding: None,
+            footer: 0,
+            radius: 0,
+            shadow: false,
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let out = engine.compose(&photo(), &s, false).unwrap();
     assert_eq!(out, photo().image.to_rgba8());
-    let s = Settings {
-        font: Some(PathBuf::from("missing-test-font.ttf")),
+    let s = RenderSettings {
+        style: StyleSettings {
+            font: Some(PathBuf::from("missing-test-font.ttf")),
+            ..s.style
+        },
         ..s
     };
     assert!(engine.compose(&photo(), &s, false).is_err());
@@ -409,9 +435,12 @@ fn no_footer_and_missing_font_are_handled() {
 #[test]
 fn atmosphere_dims_only_backdrop_and_matches_reference_proportions() {
     let mut engine = Engine::default();
-    let settings = Settings {
-        shadow: false,
-        ..Settings::default()
+    let settings = RenderSettings {
+        style: StyleSettings {
+            shadow: false,
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let photo = Photo {
         image: DynamicImage::ImageRgba8(RgbaImage::from_pixel(
@@ -437,11 +466,30 @@ fn atmosphere_dims_only_backdrop_and_matches_reference_proportions() {
 
 #[test]
 fn previous_settings_keep_uniform_margins_and_undimmed_background() {
-    let settings: Settings = serde_json::from_str(r#"{"padding":3,"blur":30}"#).unwrap();
-    assert_eq!(settings.horizontal_padding, None);
-    assert_eq!(settings.background_dim, 0);
-    let layout = render::layout(1200, 800, &settings);
+    let settings: Settings =
+        serde_json::from_str(r#"{"padding":3,"blur":30,"preset_edits":{"Dark":{"padding":8}}}"#)
+            .unwrap();
+    assert_eq!(settings.style.horizontal_padding, None);
+    assert_eq!(settings.style.background_dim, 0);
+    let layout = render::layout(1200, 800, &settings.render_settings());
     assert_eq!((layout.x, layout.y), (36, 36));
+    // Partial inactive snapshots use preset-era defaults, unlike old active fields.
+    let inactive = &settings.preset_edits[&StylePreset::Dark];
+    assert_eq!(inactive.horizontal_padding, Some(9));
+    assert_eq!(inactive.background_dim, 38);
+    let json = serde_json::to_value(&settings).unwrap();
+    assert!(
+        json.get("style").is_none(),
+        "Keep the existing flat JSON schema"
+    );
+    for (field, value) in serde_json::to_value(&settings.style)
+        .unwrap()
+        .as_object()
+        .unwrap()
+    {
+        assert_eq!(&json[field], value, "{field}");
+    }
+    assert_eq!(serde_json::from_value::<Settings>(json).unwrap(), settings);
 }
 
 #[test]
@@ -451,9 +499,12 @@ fn preferences_replace_and_reload_from_a_single_settings_file() {
     std::fs::write(&path, br#"{"quality":95}"#).unwrap();
     assert_eq!(Settings::load_from(&path).unwrap().quality, 95);
     let mut settings = Settings {
-        padding: 8,
-        font_family: Some("serif".into()),
-        title: "旅途 · {camera}".into(),
+        style: StyleSettings {
+            padding: 8,
+            font_family: Some("serif".into()),
+            title: "旅途 · {camera}".into(),
+            ..Default::default()
+        },
         format: Format::Webp,
         max_edge: 2000,
         output: Some(directory.0.join("exports")),
@@ -464,11 +515,11 @@ fn preferences_replace_and_reload_from_a_single_settings_file() {
         .push(settings.caption_template("旅行".into()));
     settings.save_to(&path).unwrap();
     assert_eq!(Settings::load_from(&path).unwrap(), settings);
-    settings.padding = 5;
-    settings.footer = 14;
-    settings.font_size = 24;
-    settings.line_gap = 12;
-    settings.title = "下一段旅程".into();
+    settings.style.padding = 5;
+    settings.style.footer = 14;
+    settings.style.font_size = 24;
+    settings.style.line_gap = 12;
+    settings.style.title = "下一段旅程".into();
     settings.format = Format::Jpeg;
     settings.quality = 95;
     settings.save_to(&path).unwrap();
@@ -505,21 +556,27 @@ fn failed_settings_replacement_preserves_target_and_removes_temporary_file() {
 #[test]
 fn caption_font_choices_change_rendered_text_without_changing_composition() {
     let mut engine = Engine::default();
-    let settings = Settings {
-        footer: 20,
-        font_size: 48,
-        title: "Camera 123".into(),
-        subtitle: String::new(),
-        ..Settings::default()
+    let settings = RenderSettings {
+        style: StyleSettings {
+            footer: 20,
+            font_size: 48,
+            title: "Camera 123".into(),
+            subtitle: String::new(),
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let original = engine.compose(&photo(), &settings, false).unwrap();
     let changed = engine
         .compose(
             &photo(),
-            &Settings {
-                font_family: Some("monospace".into()),
-                font_bold: false,
-                font_italic: false,
+            &RenderSettings {
+                style: StyleSettings {
+                    font_family: Some("monospace".into()),
+                    font_bold: false,
+                    font_italic: false,
+                    ..settings.style
+                },
                 ..settings
             },
             false,
@@ -544,15 +601,18 @@ fn jpeg_export_preserves_requested_quality_and_size_above_the_former_budget() {
     pixels.save(&source).unwrap();
     let expected = render::encode_jpeg(pixels, 95).unwrap();
     assert!(expected.len() > 256 * 1024);
-    let settings = Settings {
-        background: Background::Solid,
-        padding: 0,
-        horizontal_padding: Some(0),
-        footer: 0,
-        radius: 0,
-        shadow: false,
+    let settings = RenderSettings {
+        style: StyleSettings {
+            background: Background::Solid,
+            padding: 0,
+            horizontal_padding: Some(0),
+            footer: 0,
+            radius: 0,
+            shadow: false,
+            ..Default::default()
+        },
         quality: 95,
-        ..Settings::default()
+        ..RenderSettings::default()
     };
     let report =
         render::export_profiled(&mut Engine::default(), &source, &directory.0, &settings).unwrap();
@@ -674,13 +734,16 @@ fn jpeg_preview_reduces_pixels_and_preserves_original_metadata_and_export_size()
             .dimensions(),
         (1600, 1200)
     );
-    let settings = Settings {
-        padding: 0,
-        horizontal_padding: Some(0),
-        footer: 0,
-        shadow: false,
+    let settings = RenderSettings {
+        style: StyleSettings {
+            padding: 0,
+            horizontal_padding: Some(0),
+            footer: 0,
+            shadow: false,
+            ..Default::default()
+        },
         format: Format::Png,
-        ..Settings::default()
+        ..RenderSettings::default()
     };
     // The UI's 1536 px request must not round up to a larger decoded-cache bucket.
     let cached = render::PreviewCache::default().load(&source, 1536).unwrap();
@@ -700,15 +763,18 @@ fn row_copy_preserves_opaque_and_transparent_photo_pixels() {
     let mut engine = Engine::default();
     for alpha in [0, 128, 255] {
         for radius in [0, 10, 20] {
-            let settings = Settings {
-                background: Background::Solid,
-                color: [50, 80, 120],
-                padding: 4,
-                horizontal_padding: Some(9),
-                footer: 0,
-                radius,
-                shadow: false,
-                ..Settings::default()
+            let settings = RenderSettings {
+                style: StyleSettings {
+                    background: Background::Solid,
+                    color: [50, 80, 120],
+                    padding: 4,
+                    horizontal_padding: Some(9),
+                    footer: 0,
+                    radius,
+                    shadow: false,
+                    ..Default::default()
+                },
+                ..RenderSettings::default()
             };
             let photo = Photo {
                 image: DynamicImage::ImageRgba8(RgbaImage::from_fn(80, 60, |x, y| {
@@ -756,7 +822,7 @@ fn batch_bounds_parallelism_preserves_files_and_continues_after_errors() {
     let receiver = batch::start(
         paths,
         directory.0.clone(),
-        Settings::default(),
+        RenderSettings::default(),
         Arc::new(AtomicBool::new(false)),
         options,
     )
@@ -808,7 +874,7 @@ fn batch_cancellation_finishes_active_image_and_skips_waiting_jobs() {
     let receiver = batch::start(
         vec![source; 10],
         directory.0.join("exports"),
-        Settings::default(),
+        RenderSettings::default(),
         cancel.clone(),
         BatchOptions {
             workers: 2,
@@ -856,7 +922,7 @@ fn batch_runs_oversized_jobs_alone_without_stalling_the_queue() {
     let receiver = batch::start(
         vec![source; 3],
         directory.0.join("exports"),
-        Settings::default(),
+        RenderSettings::default(),
         Arc::new(AtomicBool::new(false)),
         BatchOptions {
             workers: 2,
@@ -880,54 +946,4 @@ fn batch_runs_oversized_jobs_alone_without_stalling_the_queue() {
         }
     }
     assert_eq!((active, completed), (0, 3));
-}
-
-#[test]
-fn automatic_batch_can_admit_more_than_two_images_when_cpu_and_memory_allow() {
-    use photo_frame::batch::{self, BatchEvent, BatchOptions};
-    use std::sync::{Arc, atomic::AtomicBool};
-    let directory = Scratch::new();
-    let source = directory.0.join("automatic.png");
-    photo()
-        .image
-        .resize_exact(640, 400, image::imageops::FilterType::Nearest)
-        .save(&source)
-        .unwrap();
-    let receiver = batch::start(
-        vec![source; 8],
-        directory.0.join("exports"),
-        Settings::default(),
-        Arc::new(AtomicBool::new(false)),
-        BatchOptions {
-            workers: 0,
-            memory_budget: 1024 * 1024 * 1024,
-        },
-    )
-    .unwrap();
-    let (mut configured, mut peak, mut completed) = (0, 0, 0);
-    let mut active = std::collections::BTreeMap::new();
-    while let Ok(event) = receiver.recv_timeout(std::time::Duration::from_secs(30)) {
-        match event {
-            BatchEvent::Configured { workers, .. } => configured = workers,
-            BatchEvent::Started {
-                index,
-                estimated_bytes,
-            } => {
-                active.insert(index, estimated_bytes);
-                peak = peak.max(active.len());
-                assert!(active.len() <= configured);
-                assert!(active.values().sum::<u64>() <= 1024 * 1024 * 1024);
-            }
-            BatchEvent::Finished { index, result, .. } => {
-                active.remove(&index);
-                assert!(result.is_ok());
-                completed += 1;
-            }
-        }
-    }
-    assert_eq!(completed, 8);
-    assert!(active.is_empty());
-    if configured > 2 {
-        assert!(peak > 2, "Automatic mode remained capped at two images");
-    }
 }

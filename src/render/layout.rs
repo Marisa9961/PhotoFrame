@@ -1,4 +1,4 @@
-use crate::settings::{Ratio, Settings};
+use crate::settings::{Ratio, RenderSettings};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
@@ -10,14 +10,14 @@ pub struct Layout {
     pub photo_h: u32,
     pub footer: u32,
 }
-pub fn layout(w: u32, h: u32, s: &Settings) -> Layout {
+pub fn layout(w: u32, h: u32, s: &RenderSettings) -> Layout {
     let edge = w.max(h) as f64;
-    let pad = edge * s.padding as f64 / 100.;
-    let footer = edge * s.footer as f64 / 100.;
-    let side = edge * s.horizontal_padding.unwrap_or(s.padding) as f64 / 100.;
+    let pad = edge * s.style.padding as f64 / 100.;
+    let footer = edge * s.style.footer as f64 / 100.;
+    let side = edge * s.style.horizontal_padding.unwrap_or(s.style.padding) as f64 / 100.;
     let mut cw = w as f64 + side * 2.;
     let mut ch = h as f64 + pad * 2. + footer;
-    let ratio = match s.ratio {
+    let ratio = match s.style.ratio {
         Ratio::Auto => None,
         Ratio::Square => Some(1.),
         Ratio::Landscape => Some(1.5),
@@ -42,9 +42,23 @@ pub fn layout(w: u32, h: u32, s: &Settings) -> Layout {
     }
 }
 
+/// Shared by export rendering and its memory estimate; settings must be normalized.
+pub(crate) fn export_layout(w: u32, h: u32, s: &RenderSettings) -> Layout {
+    let initial = layout(w, h, s);
+    if s.max_edge == 0 {
+        return initial;
+    }
+    let scale = (s.max_edge as f64 / initial.width.max(initial.height) as f64).min(1.);
+    layout(
+        (w as f64 * scale).round().max(1.) as u32,
+        (h as f64 * scale).round().max(1.) as u32,
+        s,
+    )
+}
+
 /// Choose integer photo dimensions whose rounded margins fit the actual viewport.
 /// Doing this before rasterization avoids resizing a finished canvas for a 1 px excess.
-pub(super) fn preview_layout(w: u32, h: u32, s: &Settings, viewport: (u32, u32)) -> Layout {
+pub(super) fn preview_layout(w: u32, h: u32, s: &RenderSettings, viewport: (u32, u32)) -> Layout {
     let fits = |layout: &Layout| layout.width <= viewport.0 && layout.height <= viewport.1;
     let full = layout(w, h, s);
     if fits(&full) {

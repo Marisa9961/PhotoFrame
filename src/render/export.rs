@@ -1,5 +1,5 @@
 use super::{ComposeTimings, Engine, jpeg, load};
-use crate::settings::{Format, Settings};
+use crate::settings::{Format, RenderSettings};
 use crate::tr;
 use anyhow::{Result, bail};
 use image::DynamicImage;
@@ -27,7 +27,7 @@ pub fn export(
     engine: &mut Engine,
     source: &Path,
     directory: &Path,
-    settings: &Settings,
+    settings: &RenderSettings,
 ) -> Result<PathBuf> {
     Ok(export_profiled(engine, source, directory, settings)?.path)
 }
@@ -35,7 +35,7 @@ pub fn export_profiled(
     engine: &mut Engine,
     source: &Path,
     directory: &Path,
-    settings: &Settings,
+    settings: &RenderSettings,
 ) -> Result<ExportReport> {
     let total = Instant::now();
     let photo = load(source)?;
@@ -56,7 +56,10 @@ pub fn export_profiled(
         } else {
             format!("_{index}")
         };
-        let path = directory.join(format!("{stem}_frame{suffix}.{}", settings.extension()));
+        let path = directory.join(format!(
+            "{stem}_frame{suffix}.{}",
+            settings.format.extension()
+        ));
         let file = match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

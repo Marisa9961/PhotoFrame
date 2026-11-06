@@ -1,5 +1,6 @@
+use super::logo::LogoCache;
 use super::{Layout, Photo};
-use crate::{metadata, settings::Settings, tr};
+use crate::{metadata, settings::RenderSettings, tr};
 use anyhow::{Context, Result};
 use cosmic_text::{
     Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, Style, SwashCache, Weight, Wrap,
@@ -13,6 +14,7 @@ pub(super) struct CaptionRenderer {
     cache: SwashCache,
     font_path: Option<PathBuf>,
     family: Option<String>,
+    logo: LogoCache,
 }
 
 impl Default for CaptionRenderer {
@@ -22,6 +24,7 @@ impl Default for CaptionRenderer {
             cache: SwashCache::new(),
             font_path: None,
             family: None,
+            logo: LogoCache::default(),
         }
     }
 }
@@ -54,34 +57,48 @@ impl CaptionRenderer {
     pub fn draw(
         &mut self,
         photo: &Photo,
-        s: &Settings,
+        s: &RenderSettings,
         l: &Layout,
         canvas: &mut RgbaImage,
     ) -> Result<()> {
+        if s.style.logo.is_none() {
+            self.logo.clear();
+        }
         let (w, h) = (l.photo_w, l.photo_h);
         if l.footer > 0 {
             let scale = w.max(h) as f32 / 1000.;
-            let font_size = (s.font_size as f32 * scale).max(4.);
-            let title = metadata::expand(&s.title, &photo.fields, s);
-            let subtitle = metadata::expand(&s.subtitle, &photo.fields, s);
+            let font_size = (s.style.font_size as f32 * scale).max(4.);
+            let title = metadata::expand(
+                &s.style.title,
+                &photo.fields,
+                &s.style.custom,
+                s.style.force_custom,
+                s.style.uppercase,
+            );
+            let subtitle = metadata::expand(
+                &s.style.subtitle,
+                &photo.fields,
+                &s.style.custom,
+                s.style.force_custom,
+                s.style.uppercase,
+            );
             let mut left = l.x;
             let bottom = l.y + h;
             // Extra canvas space from an aspect ratio must not push captions away from the photo.
-            let region = (l.footer + w.max(h) * s.padding / 100).min(l.height - bottom);
-            if let Some(path) = &s.logo {
-                let logo = image::open(path).context(tr!("errors.logo"))?;
+            let region = (l.footer + w.max(h) * s.style.padding / 100).min(l.height - bottom);
+            if let Some(path) = &s.style.logo {
                 let side = (region as f32 * 0.45).max(1.) as u32;
-                let logo = logo.thumbnail(side.min(w / 4).max(1), side);
+                let logo = self.logo.image(path, (side.min(w / 4).max(1), side))?;
                 imageops::overlay(
                     canvas,
-                    &logo,
+                    logo.as_ref(),
                     left as i64,
                     (bottom + (region - logo.height()) / 2) as i64,
                 );
                 left += logo.width() + (16. * scale) as u32;
             }
             let line_height = font_size * 1.4;
-            let gap = s.line_gap as f32 * scale;
+            let gap = s.style.line_gap as f32 * scale;
             let total = if subtitle.is_empty() {
                 line_height
             } else {
@@ -96,11 +113,11 @@ impl CaptionRenderer {
                 top as u32,
                 available,
                 font_size,
-                s.text_color,
-                s.align,
-                s.font_bold,
-                s.font_italic,
-                s.font_family.as_deref(),
+                s.style.text_color,
+                s.style.align,
+                s.style.font_bold,
+                s.style.font_italic,
+                s.style.font_family.as_deref(),
             );
             if !subtitle.is_empty() {
                 self.text(
@@ -110,11 +127,11 @@ impl CaptionRenderer {
                     (top + line_height + gap) as u32,
                     available,
                     font_size * 0.72,
-                    s.text_color,
-                    s.align,
-                    s.font_bold,
+                    s.style.text_color,
+                    s.style.align,
+                    s.style.font_bold,
                     false,
-                    s.font_family.as_deref(),
+                    s.style.font_family.as_deref(),
                 );
             }
         }

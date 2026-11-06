@@ -3,17 +3,20 @@ mod base;
 mod caption;
 mod effects;
 mod export;
+mod file_stamp;
 mod jpeg;
 mod layout;
+mod logo;
 mod photo;
 mod preview;
 
 pub use export::{ExportReport, ExportTimings, encode_jpeg, export, export_profiled, jpeg_backend};
+pub(crate) use layout::export_layout;
 pub use layout::{Layout, layout};
 pub use photo::{Photo, load, load_preview};
 pub use preview::PreviewCache;
 
-use crate::settings::Settings;
+use crate::settings::RenderSettings;
 use anyhow::{Result, bail};
 use effects::row_inset;
 use image::{DynamicImage, Pixel, Rgba, RgbaImage, imageops};
@@ -43,7 +46,7 @@ impl Engine {
     pub fn compose_preview(
         &mut self,
         photo: &Photo,
-        settings: &Settings,
+        settings: &RenderSettings,
         viewport: (u32, u32),
     ) -> Result<RgbaImage> {
         self.compose_preview_inner(photo, settings, viewport, None)
@@ -54,7 +57,7 @@ impl Engine {
     pub fn compose_cached_preview(
         &mut self,
         photo: &Arc<Photo>,
-        settings: &Settings,
+        settings: &RenderSettings,
         viewport: (u32, u32),
     ) -> Result<RgbaImage> {
         self.compose_preview_inner(photo, settings, viewport, Some(photo))
@@ -63,7 +66,7 @@ impl Engine {
     fn compose_preview_inner(
         &mut self,
         photo: &Photo,
-        settings: &Settings,
+        settings: &RenderSettings,
         viewport: (u32, u32),
         source: Option<&Arc<Photo>>,
     ) -> Result<RgbaImage> {
@@ -85,7 +88,7 @@ impl Engine {
     pub fn compose(
         &mut self,
         photo: &Photo,
-        settings: &Settings,
+        settings: &RenderSettings,
         preview: bool,
     ) -> Result<RgbaImage> {
         self.compose_at_edge(photo, settings, preview.then_some((1400, 1400)), None)
@@ -94,7 +97,7 @@ impl Engine {
     fn compose_at_edge(
         &mut self,
         photo: &Photo,
-        settings: &Settings,
+        settings: &RenderSettings,
         preview_viewport: Option<(u32, u32)>,
         source: Option<&Arc<Photo>>,
     ) -> Result<RgbaImage> {
@@ -102,22 +105,11 @@ impl Engine {
         let stage = Instant::now();
         let mut s = settings.clone();
         s.normalize();
-        self.captions.prepare_font(s.font.as_deref())?;
-        let initial = layout(photo.image.width(), photo.image.height(), &s);
-        let max = if s.max_edge > 0 {
-            s.max_edge
-        } else {
-            initial.width.max(initial.height)
-        };
+        self.captions.prepare_font(s.style.font.as_deref())?;
         let l = if let Some(viewport) = preview_viewport {
             layout::preview_layout(photo.image.width(), photo.image.height(), &s, viewport)
         } else {
-            let factor = (max as f64 / initial.width.max(initial.height) as f64).min(1.);
-            layout(
-                (photo.image.width() as f64 * factor).round().max(1.) as u32,
-                (photo.image.height() as f64 * factor).round().max(1.) as u32,
-                &s,
-            )
+            export_layout(photo.image.width(), photo.image.height(), &s)
         };
         let (w, h) = (l.photo_w, l.photo_h);
         if u64::from(l.width) * u64::from(l.height) > 120_000_000 {
@@ -140,7 +132,7 @@ impl Engine {
             let mut canvas = layers.canvas;
             self.timings = layers.timings;
             self.timings.resize += setup;
-            let radius = (w.min(h) as f32 * s.radius as f32 / 100.).round() as u32;
+            let radius = (w.min(h) as f32 * s.style.radius as f32 / 100.).round() as u32;
             let stage = Instant::now();
             let opaque =
                 !photo.image.color().has_alpha() || fg.pixels().all(|pixel| pixel[3] == 255);
@@ -203,10 +195,13 @@ impl Engine {
         let stage = Instant::now();
         self.captions.draw(photo, &s, &l, &mut canvas)?;
         self.timings.text = stage.elapsed();
-        if preview_viewport.is_none() && canvas.width().max(canvas.height()) > max {
+        if preview_viewport.is_none()
+            && s.max_edge > 0
+            && canvas.width().max(canvas.height()) > s.max_edge
+        {
             // Integer rounding of the photo and margins must not exceed the requested cap.
             canvas = DynamicImage::ImageRgba8(canvas)
-                .resize(max, max, imageops::FilterType::Lanczos3)
+                .resize(s.max_edge, s.max_edge, imageops::FilterType::Lanczos3)
                 .to_rgba8();
         }
         Ok(canvas)

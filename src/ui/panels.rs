@@ -24,7 +24,7 @@ impl Studio {
     }
     pub(super) fn number(
         &self,
-        key: &'static str,
+        key: StyleNumber,
         name: impl AsRef<str>,
         value: u32,
         step: i32,
@@ -57,13 +57,13 @@ impl Studio {
     }
     pub(super) fn step_button(
         &self,
-        key: &'static str,
+        key: StyleNumber,
         text: &str,
         delta: i32,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         div()
-            .id((key, if delta < 0 { 0usize } else { 1usize }))
+            .id((key.id(), if delta < 0 { 0usize } else { 1usize }))
             .w(px(28.))
             .h_full()
             .flex()
@@ -80,13 +80,13 @@ impl Studio {
     }
     pub(super) fn toggle(
         &self,
-        key: &'static str,
+        key: ToggleField,
         name: impl AsRef<str>,
         on: bool,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         row()
-            .id(key)
+            .id(key.id())
             .h(px(34.))
             .justify_between()
             .cursor_pointer()
@@ -283,7 +283,7 @@ impl Studio {
             .child(
                 panel_card()
                     .child(self.fold_header(
-                        "styles",
+                        PanelSection::Styles,
                         tr!("presets.title"),
                         if self.settings.selected_preset.is_none() {
                             tr!("presets.custom_hint")
@@ -330,7 +330,7 @@ impl Studio {
             .child(
                 panel_card()
                     .child(self.fold_header(
-                        "composition",
+                        PanelSection::Composition,
                         tr!("layout.title"),
                         tr!("layout.hint"),
                         cx,
@@ -348,7 +348,7 @@ impl Studio {
                                 .into_iter()
                                 .enumerate()
                                 .map(|(i, (ratio, name, w, h))| {
-                                    let active = self.settings.ratio == ratio;
+                                    let active = self.settings.style.ratio == ratio;
                                     col()
                                         .id(("ratio", i))
                                         .flex_1()
@@ -389,28 +389,29 @@ impl Studio {
                                 .gap_1()
                                 .child(
                                     self.number(
-                                        "horizontal_padding",
+                                        StyleNumber::HorizontalPadding,
                                         tr!("layout.horizontal_padding"),
                                         self.settings
+                                            .style
                                             .horizontal_padding
-                                            .unwrap_or(self.settings.padding),
+                                            .unwrap_or(self.settings.style.padding),
                                         1,
                                         "%",
                                         cx,
                                     ),
                                 )
                                 .child(self.number(
-                                    "padding",
+                                    StyleNumber::Padding,
                                     tr!("layout.padding"),
-                                    self.settings.padding,
+                                    self.settings.style.padding,
                                     1,
                                     "%",
                                     cx,
                                 ))
                                 .child(self.number(
-                                    "footer",
+                                    StyleNumber::Footer,
                                     tr!("layout.footer"),
-                                    self.settings.footer,
+                                    self.settings.style.footer,
                                     1,
                                     "%",
                                     cx,
@@ -422,7 +423,7 @@ impl Studio {
             .child(
                 panel_card()
                     .child(self.fold_header(
-                        "layout",
+                        PanelSection::Layout,
                         tr!("background.title"),
                         tr!("background.hint"),
                         cx,
@@ -434,19 +435,19 @@ impl Studio {
                                 .child(self.choice(
                                     "solid",
                                     tr!("background.solid"),
-                                    self.settings.background == Background::Solid,
+                                    self.settings.style.background == Background::Solid,
                                     Command::Background(Background::Solid),
                                     cx,
                                 ))
                                 .child(self.choice(
                                     "blur",
                                     tr!("background.blur"),
-                                    self.settings.background == Background::Blur,
+                                    self.settings.style.background == Background::Blur,
                                     Command::Background(Background::Blur),
                                     cx,
                                 )),
                         )
-                        .when(self.settings.background == Background::Solid, |d| {
+                        .when(self.settings.style.background == Background::Solid, |d| {
                             d.child(
                                 row().gap_2().children(
                                     [
@@ -463,11 +464,13 @@ impl Studio {
                                             .size(px(26.))
                                             .rounded_full()
                                             .border_2()
-                                            .border_color(rgb(if self.settings.color == color {
-                                                ACCENT
-                                            } else {
-                                                LINE
-                                            }))
+                                            .border_color(rgb(
+                                                if self.settings.style.color == color {
+                                                    ACCENT
+                                                } else {
+                                                    LINE
+                                                },
+                                            ))
                                             .bg(rgb((u32::from(color[0]) << 16)
                                                 | (u32::from(color[1]) << 8)
                                                 | u32::from(color[2])))
@@ -480,42 +483,42 @@ impl Studio {
                             )
                             .child(self.color_input.clone())
                         })
-                        .when(self.settings.background == Background::Blur, |d| {
+                        .when(self.settings.style.background == Background::Blur, |d| {
                             d.child(self.number(
-                                "blur",
+                                StyleNumber::Blur,
                                 tr!("background.amount"),
-                                self.settings.blur,
+                                self.settings.style.blur,
                                 5,
                                 "",
                                 cx,
                             ))
                             .child(self.number(
-                                "background_dim",
+                                StyleNumber::BackgroundDim,
                                 tr!("background.dim"),
-                                self.settings.background_dim,
+                                self.settings.style.background_dim,
                                 5,
                                 "%",
                                 cx,
                             ))
                         })
                         .child(self.number(
-                            "radius",
+                            StyleNumber::Radius,
                             tr!("background.radius"),
-                            self.settings.radius,
+                            self.settings.style.radius,
                             1,
                             "%",
                             cx,
                         ))
                         .child(self.toggle(
-                            "shadow",
+                            ToggleField::Shadow,
                             tr!("background.shadow"),
-                            self.settings.shadow,
+                            self.settings.style.shadow,
                             cx,
                         ))
                     }),
             )
             .child(self.typography_panel(cx))
-            .children(self.failures.iter().map(|e| {
+            .children(self.exports.failures().iter().map(|e| {
                 div()
                     .p_3()
                     .rounded_md()
@@ -528,19 +531,19 @@ impl Studio {
     }
     pub(super) fn fold_header(
         &self,
-        key: &'static str,
+        key: PanelSection,
         title: impl AsRef<str>,
         subtitle: impl AsRef<str>,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let (number, open) = match key {
-            "styles" => ("01", self.styles_open),
-            "composition" => ("02", self.composition_open),
-            "layout" => ("03", self.layout_open),
-            _ => ("04", self.text_open),
+            PanelSection::Styles => ("01", self.styles_open),
+            PanelSection::Composition => ("02", self.composition_open),
+            PanelSection::Layout => ("03", self.layout_open),
+            PanelSection::Text => ("04", self.text_open),
         };
         row()
-            .id(key)
+            .id(key.id())
             .justify_between()
             .gap_2()
             .rounded_md()
@@ -589,7 +592,7 @@ impl Studio {
     }
     pub(super) fn typography_panel(&self, cx: &Context<Self>) -> impl IntoElement {
         panel_card()
-            .child(self.fold_header("text", tr!("text.title"), tr!("text.hint"), cx))
+            .child(self.fold_header(PanelSection::Text, tr!("text.title"), tr!("text.hint"), cx))
             .when(self.text_open, |d| {
                 d.child(
                     row()
@@ -598,9 +601,10 @@ impl Studio {
                             self.choice(
                                 "font-sans",
                                 tr!("text.sans"),
-                                self.settings.font.is_none()
+                                self.settings.style.font.is_none()
                                     && self
                                         .settings
+                                        .style
                                         .font_family
                                         .as_deref()
                                         .is_none_or(|v| v == "sans-serif"),
@@ -611,16 +615,16 @@ impl Studio {
                         .child(self.choice(
                             "font-serif",
                             tr!("text.serif"),
-                            self.settings.font.is_none()
-                                && self.settings.font_family.as_deref() == Some("serif"),
+                            self.settings.style.font.is_none()
+                                && self.settings.style.font_family.as_deref() == Some("serif"),
                             Command::Font("serif"),
                             cx,
                         ))
                         .child(self.choice(
                             "font-mono",
                             tr!("text.monospace"),
-                            self.settings.font.is_none()
-                                && self.settings.font_family.as_deref() == Some("monospace"),
+                            self.settings.style.font.is_none()
+                                && self.settings.style.font_family.as_deref() == Some("monospace"),
                             Command::Font("monospace"),
                             cx,
                         )),
@@ -629,6 +633,7 @@ impl Studio {
                     self.button(
                         "custom-font",
                         self.settings
+                            .style
                             .font
                             .as_ref()
                             .map(|p| {
@@ -638,32 +643,37 @@ impl Studio {
                                 )
                             })
                             .unwrap_or_else(|| tr!("text.import_font")),
-                        self.settings.font.is_some(),
-                        Command::Choose("font"),
+                        self.settings.style.font.is_some(),
+                        Command::Choose(FileChoice::Font),
                         cx,
                     ),
                 )
                 .child(self.number(
-                    "font_size",
+                    StyleNumber::FontSize,
                     tr!("text.font_size"),
-                    self.settings.font_size,
+                    self.settings.style.font_size,
                     1,
                     "",
                     cx,
                 ))
                 .child(self.number(
-                    "line_gap",
+                    StyleNumber::LineGap,
                     tr!("text.line_gap"),
-                    self.settings.line_gap,
+                    self.settings.style.line_gap,
                     1,
                     "",
                     cx,
                 ))
-                .child(self.toggle("font_bold", tr!("text.bold"), self.settings.font_bold, cx))
                 .child(self.toggle(
-                    "font_italic",
+                    ToggleField::FontBold,
+                    tr!("text.bold"),
+                    self.settings.style.font_bold,
+                    cx,
+                ))
+                .child(self.toggle(
+                    ToggleField::FontItalic,
                     tr!("text.italic"),
-                    self.settings.font_italic,
+                    self.settings.style.font_italic,
                     cx,
                 ))
                 .child(
@@ -672,21 +682,21 @@ impl Studio {
                         .child(self.choice(
                             "align-left",
                             tr!("text.left"),
-                            self.settings.align == 0,
+                            self.settings.style.align == 0,
                             Command::Align(0),
                             cx,
                         ))
                         .child(self.choice(
                             "align-center",
                             tr!("text.center"),
-                            self.settings.align == 1,
+                            self.settings.style.align == 1,
                             Command::Align(1),
                             cx,
                         ))
                         .child(self.choice(
                             "align-right",
                             tr!("text.right"),
-                            self.settings.align == 2,
+                            self.settings.style.align == 2,
                             Command::Align(2),
                             cx,
                         )),
@@ -745,7 +755,7 @@ impl Studio {
     pub(super) fn export_panel(&self, cx: &Context<Self>) -> AnyElement {
         col()
             .gap_2()
-            .when(!self.exporting, |d| {
+            .when(!self.exports.is_running(), |d| {
                 d.child(
                     div()
                         .id("open-export")
@@ -764,19 +774,24 @@ impl Studio {
                         .child(tr!("export.open")),
                 )
             })
-            .when(self.exporting, |d| {
+            .when(self.exports.is_running(), |d| {
                 d.child(
                     row()
                         .justify_between()
                         .child(section(tr!("export.running")))
-                        .child(label(format!("{} / {}", self.progress.0, self.progress.1))),
+                        .child(label(format!(
+                            "{} / {}",
+                            self.exports.progress().0,
+                            self.exports.progress().1
+                        ))),
                 )
                 .child(
                     div().h(px(3.)).w_full().rounded_full().bg(rgb(LINE)).child(
                         div()
                             .h_full()
                             .w(relative(
-                                self.progress.0 as f32 / self.progress.1.max(1) as f32,
+                                self.exports.progress().0 as f32
+                                    / self.exports.progress().1.max(1) as f32,
                             ))
                             .rounded_full()
                             .bg(rgb(ACCENT)),

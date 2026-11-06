@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) struct ExportDialog {
     parent: WeakEntity<Studio>,
-    settings: Settings,
+    settings: ExportDraft,
     count: usize,
     all: bool,
     error: String,
@@ -11,11 +11,19 @@ pub(super) struct ExportDialog {
 }
 
 #[derive(Clone)]
+struct ExportDraft {
+    format: Format,
+    quality: u8,
+    max_edge: u32,
+    output: Option<PathBuf>,
+}
+
+#[derive(Clone)]
 enum Action {
     Format(Format),
     Scope(bool),
     Edge(u32),
-    Number(&'static str, i32),
+    Number(ExportNumber, i32),
     Directory,
     Save,
     Start,
@@ -25,14 +33,19 @@ enum Action {
 impl ExportDialog {
     pub(super) fn new(
         parent: WeakEntity<Studio>,
-        settings: Settings,
+        settings: &Settings,
         count: usize,
         previous_focus: Option<FocusHandle>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             parent,
-            settings,
+            settings: ExportDraft {
+                format: settings.format,
+                quality: settings.quality,
+                max_edge: settings.max_edge,
+                output: settings.output.clone(),
+            },
             count,
             all: count > 1,
             error: String::new(),
@@ -44,15 +57,14 @@ impl ExportDialog {
         match action {
             Action::Format(format) => self.settings.format = format,
             Action::Scope(all) => self.all = all,
-            Action::Edge(edge) => self.settings.max_edge = edge,
-            Action::Number(key, delta) => match key {
-                "quality" => {
+            Action::Edge(edge) => self.settings.max_edge = ExportNumber::MaxEdge.clamp(edge),
+            Action::Number(field, delta) => match field {
+                ExportNumber::Quality => {
                     self.settings.quality =
-                        (i32::from(self.settings.quality) + delta).clamp(1, 100) as u8
+                        field.adjust(u32::from(self.settings.quality), delta) as u8
                 }
-                _ => {
-                    self.settings.max_edge =
-                        (self.settings.max_edge as i32 + delta).clamp(0, 16000) as u32
+                ExportNumber::MaxEdge => {
+                    self.settings.max_edge = field.adjust(self.settings.max_edge, delta)
                 }
             },
             Action::Directory => {
@@ -87,7 +99,9 @@ impl ExportDialog {
                 if start && (self.count == 0 || self.settings.output.is_none()) {
                     return;
                 }
-                self.settings.normalize();
+                self.settings.quality =
+                    ExportNumber::Quality.clamp(u32::from(self.settings.quality)) as u8;
+                self.settings.max_edge = ExportNumber::MaxEdge.clamp(self.settings.max_edge);
                 let draft = self.settings.clone();
                 let all = self.all;
                 let result = self.parent.update(cx, |parent, cx| {
@@ -171,7 +185,7 @@ impl ExportDialog {
     }
     fn number(
         &self,
-        key: &'static str,
+        key: ExportNumber,
         name: impl AsRef<str>,
         value: u32,
         step: i32,
@@ -186,7 +200,7 @@ impl ExportDialog {
                     .w(px(160.))
                     .gap_1()
                     .child(self.button(
-                        (key, 0usize),
+                        (key.id(), 0usize),
                         "−",
                         false,
                         true,
@@ -194,14 +208,14 @@ impl ExportDialog {
                         cx,
                     ))
                     .child(div().w(px(62.)).text_center().text_size(px(12.)).child(
-                        if key == "edge" && value == 0 {
+                        if key == ExportNumber::MaxEdge && value == 0 {
                             tr!("export.original_size")
                         } else {
                             value.to_string()
                         },
                     ))
                     .child(self.button(
-                        (key, 1usize),
+                        (key.id(), 1usize),
                         "+",
                         false,
                         true,
@@ -275,7 +289,7 @@ impl Render for ExportDialog {
                                             .child(div().text_size(px(10.)).text_color(rgb(MUTED)).child(hint))
                                     })))
                                     .when(self.settings.format == Format::Jpeg, |d| d
-                                        .child(self.number("quality",tr!("export.quality"),u32::from(self.settings.quality),5,cx))
+                                        .child(self.number(ExportNumber::Quality,tr!("export.quality"),u32::from(self.settings.quality),5,cx))
                                         .child(label(tr!("export.quality_hint"))))
                                     .when(self.settings.format != Format::Jpeg, |d|d.child(label(tr!("export.lossless_hint"))))))
                             .child(col().flex_1().min_w_0().gap_4()
@@ -284,7 +298,7 @@ impl Render for ExportDialog {
                                         .child(self.button("edge-original",tr!("export.original"),self.settings.max_edge==0,true,Action::Edge(0),cx))
                                         .child(self.button("edge-2000","2000px",self.settings.max_edge==2000,true,Action::Edge(2000),cx))
                                         .child(self.button("edge-4000","4000px",self.settings.max_edge==4000,true,Action::Edge(4000),cx)))
-                                    .child(self.number("edge",tr!("export.custom_edge"),self.settings.max_edge,1000,cx))
+                                    .child(self.number(ExportNumber::MaxEdge,tr!("export.custom_edge"),self.settings.max_edge,1000,cx))
                                     .child(label(tr!("export.resize_hint"))))
                                 .child(panel_card().child(panel_heading("04", tr!("export.location"), tr!("export.location_hint")))
                                     .child(div().min_h(px(46.)).p_3().rounded_md().bg(rgb(0x111d15)).text_size(px(11.)).text_color(rgb(MUTED))

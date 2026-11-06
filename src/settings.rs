@@ -54,119 +54,128 @@ impl StylePreset {
     pub const ALL: [Self; 4] = [Self::Light, Self::Dark, Self::Atmosphere, Self::Polaroid];
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleNumber {
+    Padding,
+    HorizontalPadding,
+    Footer,
+    Radius,
+    Blur,
+    BackgroundDim,
+    FontSize,
+    LineGap,
+    Align,
+}
+
+impl StyleNumber {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Padding => "padding",
+            Self::HorizontalPadding => "horizontal_padding",
+            Self::Footer => "footer",
+            Self::Radius => "radius",
+            Self::Blur => "blur",
+            Self::BackgroundDim => "background_dim",
+            Self::FontSize => "font_size",
+            Self::LineGap => "line_gap",
+            Self::Align => "align",
+        }
+    }
+
+    pub fn clamp(self, value: u32) -> u32 {
+        let (min, max) = match self {
+            Self::Padding | Self::HorizontalPadding => (0, 30),
+            Self::Footer | Self::LineGap => (0, 40),
+            Self::Radius => (0, 20),
+            Self::Blur => (0, 100),
+            Self::BackgroundDim => (0, 90),
+            Self::FontSize => (8, 80),
+            Self::Align => (0, 2),
+        };
+        value.clamp(min, max)
+    }
+
+    pub fn adjust(self, style: &mut StyleSettings, delta: i32) {
+        let value = match self {
+            Self::Padding => {
+                style.horizontal_padding.get_or_insert(style.padding);
+                &mut style.padding
+            }
+            Self::HorizontalPadding => style.horizontal_padding.get_or_insert(style.padding),
+            Self::Footer => &mut style.footer,
+            Self::Radius => &mut style.radius,
+            Self::Blur => &mut style.blur,
+            Self::BackgroundDim => &mut style.background_dim,
+            Self::FontSize => &mut style.font_size,
+            Self::LineGap => &mut style.line_gap,
+            Self::Align => &mut style.align,
+        };
+        *value = self.clamp(value.saturating_add_signed(delta));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportNumber {
+    Quality,
+    MaxEdge,
+}
+
+impl ExportNumber {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Quality => "quality",
+            Self::MaxEdge => "edge",
+        }
+    }
+
+    pub fn clamp(self, value: u32) -> u32 {
+        match self {
+            Self::Quality => value.clamp(1, 100),
+            Self::MaxEdge => value.min(16000),
+        }
+    }
+
+    pub fn adjust(self, value: u32, delta: i32) -> u32 {
+        self.clamp(value.saturating_add_signed(delta))
+    }
+}
+
+/// Parameters consumed by rendering and batch workers, without preference history.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderSettings {
+    pub style: StyleSettings,
+    pub format: Format,
+    pub quality: u8,
+    pub max_edge: u32,
+}
+
+impl Default for RenderSettings {
+    fn default() -> Self {
+        Settings::default().render_settings()
+    }
+}
+
+impl RenderSettings {
+    pub fn normalize(&mut self) {
+        self.style.normalize();
+        self.quality = ExportNumber::Quality.clamp(u32::from(self.quality)) as u8;
+        self.max_edge = ExportNumber::MaxEdge.clamp(self.max_edge);
+    }
+}
+
 /// Visual state of one preset; export preferences and saved templates are independent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StyleSettings {
-    background: Background,
-    ratio: Ratio,
-    color: [u8; 3],
-    text_color: [u8; 3],
-    padding: u32,
-    horizontal_padding: Option<u32>,
-    footer: u32,
-    radius: u32,
-    blur: u32,
-    background_dim: u32,
-    shadow: bool,
-    font_size: u32,
-    line_gap: u32,
-    align: u32,
-    uppercase: bool,
-    title: String,
-    subtitle: String,
-    custom: BTreeMap<String, String>,
-    force_custom: bool,
-    font: Option<PathBuf>,
-    font_family: Option<String>,
-    font_bold: bool,
-    font_italic: bool,
-    logo: Option<PathBuf>,
-}
-
-impl Default for StyleSettings {
-    fn default() -> Self {
-        Self::capture(&Settings::default())
-    }
-}
-
-impl StyleSettings {
-    fn capture(settings: &Settings) -> Self {
-        Self {
-            background: settings.background,
-            ratio: settings.ratio,
-            color: settings.color,
-            text_color: settings.text_color,
-            padding: settings.padding,
-            horizontal_padding: settings.horizontal_padding,
-            footer: settings.footer,
-            radius: settings.radius,
-            blur: settings.blur,
-            background_dim: settings.background_dim,
-            shadow: settings.shadow,
-            font_size: settings.font_size,
-            line_gap: settings.line_gap,
-            align: settings.align,
-            uppercase: settings.uppercase,
-            title: settings.title.clone(),
-            subtitle: settings.subtitle.clone(),
-            custom: settings.custom.clone(),
-            force_custom: settings.force_custom,
-            font: settings.font.clone(),
-            font_family: settings.font_family.clone(),
-            font_bold: settings.font_bold,
-            font_italic: settings.font_italic,
-            logo: settings.logo.clone(),
-        }
-    }
-
-    fn apply_to(&self, settings: &mut Settings) {
-        settings.background = self.background;
-        settings.ratio = self.ratio;
-        settings.color = self.color;
-        settings.text_color = self.text_color;
-        settings.padding = self.padding;
-        settings.horizontal_padding = self.horizontal_padding;
-        settings.footer = self.footer;
-        settings.radius = self.radius;
-        settings.blur = self.blur;
-        settings.background_dim = self.background_dim;
-        settings.shadow = self.shadow;
-        settings.font_size = self.font_size;
-        settings.line_gap = self.line_gap;
-        settings.align = self.align;
-        settings.uppercase = self.uppercase;
-        settings.title.clone_from(&self.title);
-        settings.subtitle.clone_from(&self.subtitle);
-        settings.custom.clone_from(&self.custom);
-        settings.force_custom = self.force_custom;
-        settings.font.clone_from(&self.font);
-        settings.font_family.clone_from(&self.font_family);
-        settings.font_bold = self.font_bold;
-        settings.font_italic = self.font_italic;
-        settings.logo.clone_from(&self.logo);
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Settings {
-    pub language: crate::i18n::Language,
-    pub selected_preset: Option<StylePreset>,
-    /// Only inactive presets are stored here; the fields below are the active edit.
-    pub preset_edits: BTreeMap<StylePreset, StyleSettings>,
     pub background: Background,
     pub ratio: Ratio,
     pub color: [u8; 3],
     pub text_color: [u8; 3],
     pub padding: u32,
-    /// None keeps the uniform margins of previously saved configurations.
-    #[serde(default)]
     pub horizontal_padding: Option<u32>,
     pub footer: u32,
     pub radius: u32,
     pub blur: u32,
-    #[serde(default)]
     pub background_dim: u32,
     pub shadow: bool,
     pub font_size: u32,
@@ -181,19 +190,12 @@ pub struct Settings {
     pub font_family: Option<String>,
     pub font_bold: bool,
     pub font_italic: bool,
-    pub caption_templates: Vec<CaptionTemplate>,
     pub logo: Option<PathBuf>,
-    pub format: Format,
-    pub quality: u8,
-    pub max_edge: u32,
-    pub output: Option<PathBuf>,
 }
-impl Default for Settings {
+
+impl Default for StyleSettings {
     fn default() -> Self {
         Self {
-            language: crate::i18n::Language::default(),
-            selected_preset: Some(StylePreset::Atmosphere),
-            preset_edits: BTreeMap::new(),
             background: Background::Blur,
             ratio: Ratio::Auto,
             color: [250, 249, 246],
@@ -217,21 +219,14 @@ impl Default for Settings {
             font_family: None,
             font_bold: true,
             font_italic: true,
-            caption_templates: vec![],
             logo: None,
-            format: Format::Jpeg,
-            quality: 85,
-            max_edge: 0,
-            output: None,
         }
     }
 }
-impl Settings {
-    fn preset_settings(preset: StylePreset) -> Self {
-        let mut settings = Self {
-            selected_preset: Some(preset),
-            ..Self::default()
-        };
+
+impl StyleSettings {
+    fn preset(preset: StylePreset) -> Self {
+        let mut settings = Self::default();
         if preset != StylePreset::Atmosphere {
             settings.background = Background::Solid;
             settings.color = if preset == StylePreset::Dark {
@@ -266,13 +261,87 @@ impl Settings {
         settings
     }
 
+    fn normalize(&mut self) {
+        self.padding = StyleNumber::Padding.clamp(self.padding);
+        self.horizontal_padding = self
+            .horizontal_padding
+            .map(|v| StyleNumber::HorizontalPadding.clamp(v));
+        self.footer = StyleNumber::Footer.clamp(self.footer);
+        self.radius = StyleNumber::Radius.clamp(self.radius);
+        self.blur = StyleNumber::Blur.clamp(self.blur);
+        self.background_dim = StyleNumber::BackgroundDim.clamp(self.background_dim);
+        self.font_size = StyleNumber::FontSize.clamp(self.font_size);
+        self.line_gap = StyleNumber::LineGap.clamp(self.line_gap);
+        self.align = StyleNumber::Align.clamp(self.align);
+    }
+}
+
+// Active styles historically defaulted these two missing fields independently of
+// the current preset. Inactive snapshots retain StyleSettings's own defaults.
+fn deserialize_active_style<'de, D>(deserializer: D) -> Result<StyleSettings, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let legacy_margins = value.get("horizontal_padding").is_none();
+    let legacy_dim = value.get("background_dim").is_none();
+    let mut style: StyleSettings =
+        serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+    if legacy_margins {
+        style.horizontal_padding = None;
+    }
+    if legacy_dim {
+        style.background_dim = 0;
+    }
+    Ok(style)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    #[serde(flatten, deserialize_with = "deserialize_active_style")]
+    pub style: StyleSettings,
+    pub language: crate::i18n::Language,
+    pub selected_preset: Option<StylePreset>,
+    /// Only inactive presets are stored here; style is the active edit.
+    pub preset_edits: BTreeMap<StylePreset, StyleSettings>,
+    pub caption_templates: Vec<CaptionTemplate>,
+    pub format: Format,
+    pub quality: u8,
+    pub max_edge: u32,
+    pub output: Option<PathBuf>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            style: StyleSettings::default(),
+            language: crate::i18n::Language::default(),
+            selected_preset: Some(StylePreset::Atmosphere),
+            preset_edits: BTreeMap::new(),
+            caption_templates: vec![],
+            format: Format::Jpeg,
+            quality: 85,
+            max_edge: 0,
+            output: None,
+        }
+    }
+}
+impl Settings {
+    pub fn render_settings(&self) -> RenderSettings {
+        RenderSettings {
+            style: self.style.clone(),
+            format: self.format,
+            quality: self.quality,
+            max_edge: self.max_edge,
+        }
+    }
     fn remember_current_style(&mut self) {
         if let Some(preset) = self.selected_preset {
             if self.matches_preset(preset) {
                 self.preset_edits.remove(&preset);
             } else {
-                self.preset_edits
-                    .insert(preset, StyleSettings::capture(self));
+                self.preset_edits.insert(preset, self.style.clone());
             }
         }
     }
@@ -286,8 +355,8 @@ impl Settings {
         let style = self
             .preset_edits
             .remove(&preset)
-            .unwrap_or_else(|| StyleSettings::capture(&Self::preset_settings(preset)));
-        style.apply_to(self);
+            .unwrap_or_else(|| StyleSettings::preset(preset));
+        self.style = style;
         self.selected_preset = Some(preset);
     }
 
@@ -295,11 +364,11 @@ impl Settings {
     pub fn restore_preset(&mut self, preset: StylePreset) {
         self.switch_preset(preset);
         self.preset_edits.remove(&preset);
-        StyleSettings::capture(&Self::preset_settings(preset)).apply_to(self);
+        self.style = StyleSettings::preset(preset);
     }
 
     fn matches_preset(&self, preset: StylePreset) -> bool {
-        StyleSettings::capture(self) == StyleSettings::capture(&Self::preset_settings(preset))
+        self.style == StyleSettings::preset(preset)
     }
 
     pub fn preset_modified(&self) -> bool {
@@ -310,41 +379,33 @@ impl Settings {
     pub fn caption_template(&self, name: String) -> CaptionTemplate {
         CaptionTemplate {
             name,
-            title: self.title.clone(),
-            subtitle: self.subtitle.clone(),
-            family: self.font_family.clone(),
-            font: self.font.clone(),
-            size: self.font_size,
-            gap: self.line_gap,
-            bold: self.font_bold,
-            italic: self.font_italic,
-            align: self.align,
+            title: self.style.title.clone(),
+            subtitle: self.style.subtitle.clone(),
+            family: self.style.font_family.clone(),
+            font: self.style.font.clone(),
+            size: self.style.font_size,
+            gap: self.style.line_gap,
+            bold: self.style.font_bold,
+            italic: self.style.font_italic,
+            align: self.style.align,
         }
     }
     pub fn apply_caption_template(&mut self, template: &CaptionTemplate) {
-        self.title = template.title.clone();
-        self.subtitle = template.subtitle.clone();
-        self.font_family = template.family.clone();
-        self.font = template.font.clone();
-        self.font_size = template.size;
-        self.line_gap = template.gap;
-        self.font_bold = template.bold;
-        self.font_italic = template.italic;
-        self.align = template.align;
+        self.style.title = template.title.clone();
+        self.style.subtitle = template.subtitle.clone();
+        self.style.font_family = template.family.clone();
+        self.style.font = template.font.clone();
+        self.style.font_size = template.size;
+        self.style.line_gap = template.gap;
+        self.style.font_bold = template.bold;
+        self.style.font_italic = template.italic;
+        self.style.align = template.align;
         self.normalize();
     }
     pub fn normalize(&mut self) {
-        self.padding = self.padding.min(30);
-        self.horizontal_padding = self.horizontal_padding.map(|v| v.min(30));
-        self.footer = self.footer.min(40);
-        self.radius = self.radius.min(20);
-        self.blur = self.blur.min(100);
-        self.background_dim = self.background_dim.min(90);
-        self.font_size = self.font_size.clamp(8, 80);
-        self.line_gap = self.line_gap.min(40);
-        self.align = self.align.min(2);
-        self.quality = self.quality.clamp(1, 100);
-        self.max_edge = self.max_edge.min(16000);
+        self.style.normalize();
+        self.quality = ExportNumber::Quality.clamp(u32::from(self.quality)) as u8;
+        self.max_edge = ExportNumber::MaxEdge.clamp(self.max_edge);
     }
     pub fn config_path() -> PathBuf {
         std::env::var_os("APPDATA")
@@ -368,33 +429,33 @@ impl Settings {
         let legacy_font = json.get("font_bold").is_none();
         let mut value: Self = serde_json::from_value(json)?;
         if legacy {
-            if value.footer == 14 {
-                value.footer = 6;
+            if value.style.footer == 14 {
+                value.style.footer = 6;
             }
-            if value.padding == 5 {
-                value.padding = 3;
+            if value.style.padding == 5 {
+                value.style.padding = 3;
             }
-            if value.font_size == 24 {
-                value.font_size = 20;
+            if value.style.font_size == 24 {
+                value.style.font_size = 20;
             }
-            if value.line_gap == 12 {
-                value.line_gap = 6;
+            if value.style.line_gap == 12 {
+                value.style.line_gap = 6;
             }
-            if value.background == Background::Solid
-                && value.color == [250, 249, 246]
-                && value.text_color == [45, 45, 43]
-                && value.radius == 0
-                && !value.shadow
+            if value.style.background == Background::Solid
+                && value.style.color == [250, 249, 246]
+                && value.style.text_color == [45, 45, 43]
+                && value.style.radius == 0
+                && !value.style.shadow
             {
-                value.background = Background::Blur;
-                value.text_color = [244, 244, 240];
-                value.radius = 2;
-                value.shadow = true;
+                value.style.background = Background::Blur;
+                value.style.text_color = [244, 244, 240];
+                value.style.radius = 2;
+                value.style.shadow = true;
             }
         }
         if legacy_font {
-            value.font_bold = value.background == Background::Blur;
-            value.font_italic = value.background == Background::Blur;
+            value.style.font_bold = value.style.background == Background::Blur;
+            value.style.font_italic = value.style.background == Background::Blur;
         }
         value.normalize();
         if missing_preset {
@@ -408,11 +469,8 @@ impl Settings {
             value.preset_edits.remove(&preset);
         }
         value.preset_edits.retain(|preset, style| {
-            let mut settings = Self::preset_settings(*preset);
-            style.apply_to(&mut settings);
-            settings.normalize();
-            *style = StyleSettings::capture(&settings);
-            !settings.matches_preset(*preset)
+            style.normalize();
+            *style != StyleSettings::preset(*preset)
         });
         Ok(value)
     }
@@ -450,7 +508,13 @@ impl Settings {
         result
     }
     pub fn extension(&self) -> &'static str {
-        match self.format {
+        self.format.extension()
+    }
+}
+
+impl Format {
+    pub fn extension(self) -> &'static str {
+        match self {
             Format::Jpeg => "jpg",
             Format::Png => "png",
             Format::Webp => "webp",
@@ -463,33 +527,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn numeric_edits_detach_legacy_margins_and_saturate_without_overflow() {
+        let mut style = StyleSettings {
+            padding: 3,
+            horizontal_padding: None,
+            ..StyleSettings::default()
+        };
+        StyleNumber::Padding.adjust(&mut style, i32::MAX);
+        assert_eq!((style.padding, style.horizontal_padding), (30, Some(3)));
+        StyleNumber::HorizontalPadding.adjust(&mut style, i32::MIN);
+        assert_eq!((style.padding, style.horizontal_padding), (30, Some(0)));
+        StyleNumber::FontSize.adjust(&mut style, i32::MIN);
+        assert_eq!(style.font_size, 8);
+        assert_eq!(ExportNumber::Quality.adjust(1, i32::MIN), 1);
+        assert_eq!(ExportNumber::Quality.adjust(100, i32::MAX), 100);
+        assert_eq!(ExportNumber::MaxEdge.adjust(0, i32::MIN), 0);
+        assert_eq!(ExportNumber::MaxEdge.adjust(u32::MAX, i32::MAX), 16000);
+    }
+
+    #[test]
     fn presets_replace_previous_visual_edits_and_preserve_user_preferences() {
         for preset in StylePreset::ALL {
             let mut edited = Settings {
-                ratio: Ratio::Square,
-                padding: 18,
-                horizontal_padding: Some(21),
-                footer: 35,
-                background: Background::Solid,
-                color: [1, 2, 3],
-                text_color: [4, 5, 6],
-                radius: 15,
-                blur: 20,
-                background_dim: 70,
-                shadow: false,
-                font_size: 45,
-                line_gap: 20,
-                align: 2,
-                uppercase: true,
-                title: "旧标题".into(),
-                subtitle: "旧副标题".into(),
-                custom: BTreeMap::from([("camera".into(), "自定义相机".into())]),
-                force_custom: true,
-                font: Some(PathBuf::from("old.ttf")),
-                font_family: Some("旧字体".into()),
-                font_bold: false,
-                font_italic: false,
-                logo: Some(PathBuf::from("old-logo.png")),
+                style: StyleSettings {
+                    ratio: Ratio::Square,
+                    padding: 18,
+                    horizontal_padding: Some(21),
+                    footer: 35,
+                    background: Background::Solid,
+                    color: [1, 2, 3],
+                    text_color: [4, 5, 6],
+                    radius: 15,
+                    blur: 20,
+                    background_dim: 70,
+                    shadow: false,
+                    font_size: 45,
+                    line_gap: 20,
+                    align: 2,
+                    uppercase: true,
+                    title: "旧标题".into(),
+                    subtitle: "旧副标题".into(),
+                    custom: BTreeMap::from([("camera".into(), "自定义相机".into())]),
+                    force_custom: true,
+                    font: Some(PathBuf::from("old.ttf")),
+                    font_family: Some("旧字体".into()),
+                    font_bold: false,
+                    font_italic: false,
+                    logo: Some(PathBuf::from("old-logo.png")),
+                },
                 format: Format::Webp,
                 quality: 97,
                 max_edge: 3000,
@@ -503,16 +588,13 @@ mod tests {
             edited.restore_preset(preset);
             let mut clean = Settings::default();
             clean.restore_preset(preset);
-            assert_eq!(
-                StyleSettings::capture(&edited),
-                StyleSettings::capture(&clean)
-            );
+            assert_eq!(edited.style, clean.style);
             assert_eq!(edited.selected_preset, Some(preset));
             assert!(!edited.preset_modified());
-            assert_eq!(edited.ratio, Ratio::Auto);
-            assert_eq!(edited.title, "{camera}");
-            assert!(edited.font.is_none() && edited.logo.is_none());
-            assert!(edited.custom.is_empty() && !edited.force_custom);
+            assert_eq!(edited.style.ratio, Ratio::Auto);
+            assert_eq!(edited.style.title, "{camera}");
+            assert!(edited.style.font.is_none() && edited.style.logo.is_none());
+            assert!(edited.style.custom.is_empty() && !edited.style.force_custom);
             assert_eq!(edited.caption_templates, preferences.caption_templates);
             assert_eq!(
                 (edited.format, edited.quality, edited.max_edge),
@@ -523,24 +605,11 @@ mod tests {
     }
 
     #[test]
-    fn preset_identity_survives_edits_and_explicit_restore_clears_them() {
-        for preset in StylePreset::ALL {
-            let mut settings = Settings::default();
-            settings.restore_preset(preset);
-            let original = settings.clone();
-            settings.title = "临时文字".into();
-            settings.font_italic = !settings.font_italic;
-            settings.ratio = Ratio::Portrait;
-            assert_eq!(settings.selected_preset, Some(preset));
-            assert!(settings.preset_modified());
-            settings.restore_preset(preset);
-            assert_eq!(settings, original);
-            assert!(!settings.preset_modified());
-        }
+    fn preset_modification_tracks_visual_edits_and_ignores_global_preferences() {
         let mut settings = Settings::default();
-        settings.padding += 1;
+        settings.style.padding += 1;
         assert!(settings.preset_modified());
-        settings.padding -= 1;
+        settings.style.padding -= 1;
         assert!(!settings.preset_modified());
         settings.quality = 99;
         settings.format = Format::Png;
@@ -553,15 +622,18 @@ mod tests {
     #[test]
     fn caption_templates_round_trip_and_preserve_frame_and_export_settings() {
         let source = Settings {
-            title: "旅行 · {camera}".into(),
-            subtitle: "{date} / {focal}".into(),
-            font_family: Some("serif".into()),
-            font: Some(PathBuf::from("my-font.ttf")),
-            font_size: 30,
-            line_gap: 8,
-            font_bold: false,
-            font_italic: true,
-            align: 0,
+            style: StyleSettings {
+                title: "旅行 · {camera}".into(),
+                subtitle: "{date} / {focal}".into(),
+                font_family: Some("serif".into()),
+                font: Some(PathBuf::from("my-font.ttf")),
+                font_size: 30,
+                line_gap: 8,
+                font_bold: false,
+                font_italic: true,
+                align: 0,
+                ..Default::default()
+            },
             ..Settings::default()
         };
         let mut saved = source.clone();
@@ -571,21 +643,28 @@ mod tests {
         let decoded: Settings =
             serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
         let mut target = Settings {
-            padding: 12,
+            style: StyleSettings {
+                padding: 12,
+                ..Default::default()
+            },
             quality: 92,
             ..Settings::default()
         };
         target.apply_caption_template(&decoded.caption_templates[0]);
-        assert_eq!(target.title, source.title);
-        assert_eq!(target.subtitle, source.subtitle);
-        assert_eq!(target.font, source.font);
-        assert_eq!(target.font_family, source.font_family);
+        assert_eq!(target.style.title, source.style.title);
+        assert_eq!(target.style.subtitle, source.style.subtitle);
+        assert_eq!(target.style.font, source.style.font);
+        assert_eq!(target.style.font_family, source.style.font_family);
         assert_eq!(
-            (target.font_size, target.line_gap, target.align),
+            (
+                target.style.font_size,
+                target.style.line_gap,
+                target.style.align
+            ),
             (30, 8, 0)
         );
-        assert!(!target.font_bold);
-        assert!(target.font_italic);
-        assert_eq!((target.padding, target.quality), (12, 92));
+        assert!(!target.style.font_bold);
+        assert!(target.style.font_italic);
+        assert_eq!((target.style.padding, target.quality), (12, 92));
     }
 }

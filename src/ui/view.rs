@@ -4,11 +4,11 @@ impl Render for Studio {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let filmstrip = self.filmstrip(window, cx);
         let now = std::time::Instant::now();
-        self.preview.advance(now);
-        for image in self.preview.take_retired() {
+        self.preview.display.advance(now);
+        for image in self.preview.display.take_retired() {
             let _ = window.drop_image(image);
         }
-        if self.preview.is_animating() {
+        if self.preview.display.is_animating() {
             window.request_animation_frame();
         }
         let status = match &self.preference_error {
@@ -16,7 +16,7 @@ impl Render for Studio {
             None => self.status.clone(),
         };
         let empty = self.photos.is_empty();
-        let previous_target = self.preview_target;
+        let previous_target = self.preview.target();
         let preview_owner = cx.entity().downgrade();
         let preview_observer = canvas(
             move |bounds, window, _| {
@@ -28,8 +28,8 @@ impl Render for Studio {
                 if target.0 > 0 && target.1 > 0 && target != previous_target {
                     window.on_next_frame(move |_, cx| {
                         let _ = preview_owner.update(cx, |this, cx| {
-                            if this.preview_target != target {
-                                this.preview_target = target;
+                            if this.preview.target() != target {
+                                this.preview.set_target(target);
                                 this.refresh(PreviewTrigger::Resize, cx);
                             }
                         });
@@ -50,17 +50,18 @@ impl Render for Studio {
                     .into_owned()
             })
             .unwrap_or_default();
-        let preview = if let Some(image) = self.preview.image().cloned() {
-            let opacity = self.preview.opacity(now);
+        let preview = if let Some(image) = self.preview.display.image().cloned() {
+            let opacity = self.preview.display.opacity(now);
             div()
                 .relative()
                 .size_full()
                 .min_w_0()
                 .min_h_0()
                 .overflow_hidden()
-                .when_some(self.preview.previous().cloned(), |layer, previous| {
-                    layer.child(preview_layer(previous, 1. - opacity))
-                })
+                .when_some(
+                    self.preview.display.previous().cloned(),
+                    |layer, previous| layer.child(preview_layer(previous, 1. - opacity)),
+                )
                 .child(preview_layer(image, opacity))
                 .into_any_element()
         } else {
@@ -75,7 +76,7 @@ impl Render for Studio {
                 )
                 .child(div().text_xl().child(if empty {
                     tr!("preview.import")
-                } else if self.rendering {
+                } else if self.preview.is_rendering() {
                     tr!("preview.loading")
                 } else {
                     tr!("preview.failed")
@@ -119,7 +120,7 @@ impl Render for Studio {
                                             .h(px(22.))
                                             .justify_between()
                                             .child(div().overflow_hidden().child(title))
-                                            .child(label(if self.rendering {
+                                            .child(label(if self.preview.is_rendering() {
                                                 tr!("preview.updating")
                                             } else if empty {
                                                 String::new()

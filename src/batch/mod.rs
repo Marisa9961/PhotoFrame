@@ -5,7 +5,7 @@ use memory::{available_memory, process_memory};
 
 use crate::{
     render::{self, Engine, ExportReport},
-    settings::Settings,
+    settings::RenderSettings,
 };
 use anyhow::{Result, anyhow};
 use std::{
@@ -158,7 +158,7 @@ impl Drop for Permit {
 pub fn start(
     paths: Vec<PathBuf>,
     output: PathBuf,
-    settings: Settings,
+    settings: RenderSettings,
     cancel: Arc<AtomicBool>,
     options: BatchOptions,
 ) -> Result<Receiver<BatchEvent>> {
@@ -170,6 +170,7 @@ pub fn start(
         paths.len(),
     );
     let workers = plan.workers;
+    let settings = Arc::new(settings);
     let paths = Arc::new(paths);
     let queue = Arc::new(Mutex::new(0usize));
     let gate = Arc::new(MemoryGate {

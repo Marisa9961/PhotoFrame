@@ -12,22 +12,22 @@ impl Studio {
             Ok(s) => (s, tr!("status.ready")),
             Err(e) => (Settings::default(), tr!("errors.config", error = e)),
         };
-        let color_input = cx.new(|cx| TextInput::new(hex(settings.color), cx));
-        let title_input = cx.new(|cx| TextInput::new(&settings.title, cx));
-        let subtitle_input = cx.new(|cx| TextInput::new(&settings.subtitle, cx));
+        let color_input = cx.new(|cx| TextInput::new(hex(settings.style.color), cx));
+        let title_input = cx.new(|cx| TextInput::new(&settings.style.title, cx));
+        let subtitle_input = cx.new(|cx| TextInput::new(&settings.style.subtitle, cx));
         let template_name = cx.new(|cx| TextInput::new(tr!("text.templates"), cx));
         let title_subscription = cx.subscribe(&title_input, |this, input, _: &Changed, cx| {
-            this.settings.title = input.read(cx).value();
+            this.settings.style.title = input.read(cx).value();
             this.refresh(PreviewTrigger::Input, cx);
         });
         let subtitle_subscription =
             cx.subscribe(&subtitle_input, |this, input, _: &Changed, cx| {
-                this.settings.subtitle = input.read(cx).value();
+                this.settings.style.subtitle = input.read(cx).value();
                 this.refresh(PreviewTrigger::Input, cx);
             });
         let subscription = cx.subscribe(&color_input, |this, input, _: &Changed, cx| {
             if let Some(color) = parse_color(&input.read(cx).value()) {
-                this.settings.color = color;
+                this.settings.style.color = color;
                 this.refresh(PreviewTrigger::Input, cx);
             } else {
                 this.status = tr!("errors.color");
@@ -50,11 +50,10 @@ impl Studio {
             persisted_settings: settings.clone(),
             preference_error: None,
             settings,
-            photos: vec![],
+            photos: Arc::default(),
             selected: 0,
-            preview: preview_display::PreviewDisplay::default(),
-            preview_size: (0, 0),
-            preview_target: (0, 0),
+            preview: preview_coordinator::PreviewCoordinator::default(),
+            exports: export_session::ExportSession::default(),
             thumbnails: thumbnails::Thumbnails::default(),
             thumbnail_task: None,
             filmstrip_scroll: ScrollHandle::new(),
@@ -65,17 +64,8 @@ impl Studio {
             text_open: false,
             export_dialog: None,
             settings_dialog: None,
-            pending_export: None,
             pending_preset_restore: None,
             status,
-            rendering: false,
-            exporting: false,
-            progress: (0, 0),
-            failures: vec![],
-            preview_state: Arc::new(Mutex::new(None)),
-            generation: Arc::new(AtomicU64::new(0)),
-            preview_task: None,
-            cancel: Arc::new(AtomicBool::new(false)),
             color_input,
             title_input,
             subtitle_input,
@@ -101,12 +91,13 @@ impl Studio {
         Ok(())
     }
     pub(super) fn sync_inputs(&self, cx: &mut Context<Self>) {
-        self.color_input
-            .update(cx, |input, cx| input.set(&hex(self.settings.color), cx));
+        self.color_input.update(cx, |input, cx| {
+            input.set(&hex(self.settings.style.color), cx)
+        });
         self.title_input
-            .update(cx, |input, cx| input.set(&self.settings.title, cx));
+            .update(cx, |input, cx| input.set(&self.settings.style.title, cx));
         self.subtitle_input
-            .update(cx, |input, cx| input.set(&self.settings.subtitle, cx));
+            .update(cx, |input, cx| input.set(&self.settings.style.subtitle, cx));
     }
     pub fn add(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         if self.export_dialog.is_some() || self.settings_dialog.is_some() {
@@ -125,7 +116,7 @@ impl Studio {
             {
                 let path = path.canonicalize().unwrap_or(path);
                 if !self.photos.contains(&path) {
-                    self.photos.push(path);
+                    Arc::make_mut(&mut self.photos).push(path);
                 }
             } else {
                 rejected += 1;
@@ -146,17 +137,16 @@ impl Studio {
         }
         cx.notify();
     }
-    pub(super) fn choose(&mut self, kind: &'static str, cx: &mut Context<Self>) {
+    pub(super) fn choose(&mut self, kind: FileChoice, cx: &mut Context<Self>) {
         let response = cx.prompt_for_paths(PathPromptOptions {
-            files: kind != "output",
-            directories: kind == "output",
-            multiple: kind == "photos",
+            files: kind != FileChoice::Output,
+            directories: kind == FileChoice::Output,
+            multiple: kind == FileChoice::Photos,
             prompt: Some(
                 match kind {
-                    "photos" => tr!("prompts.photos"),
-                    "font" => tr!("prompts.font"),
-                    "logo" => tr!("prompts.logo"),
-                    _ => tr!("prompts.output"),
+                    FileChoice::Photos => tr!("prompts.photos"),
+                    FileChoice::Font => tr!("prompts.font"),
+                    FileChoice::Output => tr!("prompts.output"),
                 }
                 .into(),
             ),
@@ -164,18 +154,18 @@ impl Studio {
         cx.spawn(async move |this, cx| match response.await {
             Ok(Ok(Some(paths))) => {
                 let _ = this.update(cx, |this, cx| {
-                    if kind == "photos" {
+                    if kind == FileChoice::Photos {
                         this.add(paths, cx);
                         return;
                     }
                     if let Some(path) = paths.into_iter().next() {
                         match kind {
-                            "font" => this.settings.font = Some(path),
-                            "logo" => this.settings.logo = Some(path),
-                            _ => this.settings.output = Some(path),
+                            FileChoice::Font => this.settings.style.font = Some(path),
+                            FileChoice::Output => this.settings.output = Some(path),
+                            FileChoice::Photos => unreachable!("Photo imports are handled above"),
                         }
-                        if kind == "output" {
-                            if let Some(all) = this.pending_export.take() {
+                        if kind == FileChoice::Output {
+                            if let Some(all) = this.exports.pending_scope.take() {
                                 this.export(all, cx);
                             }
                             cx.notify();
@@ -188,16 +178,16 @@ impl Studio {
             Ok(Err(e)) => {
                 let _ = this.update(cx, |this, cx| {
                     this.status = tr!("errors.choose_file", error = e);
-                    if kind == "output" {
-                        this.pending_export = None;
+                    if kind == FileChoice::Output {
+                        this.exports.pending_scope = None;
                     }
                     cx.notify();
                 });
             }
             _ => {
                 let _ = this.update(cx, |this, cx| {
-                    if kind == "output" {
-                        this.pending_export = None;
+                    if kind == FileChoice::Output {
+                        this.exports.pending_scope = None;
                     }
                     cx.notify();
                 });
@@ -207,95 +197,19 @@ impl Studio {
     }
     pub(super) fn refresh(&mut self, trigger: PreviewTrigger, cx: &mut Context<Self>) {
         self.pending_preset_restore = None;
-        let request = PreviewRequest::new(self.generation.clone());
-        // Dropping the task cancels pending timers instead of retaining one per keystroke.
-        self.preview_task = None;
-        let Some(path) = self.photos.get(self.selected).cloned() else {
-            // Drop retained pixels without waiting on a background render's mutex.
-            self.preview_state = Arc::new(Mutex::new(None));
-            self.preview.clear();
-            self.rendering = false;
-            cx.notify();
-            return;
-        };
-        self.preview.select(&path);
-        self.rendering = true;
-        let target = self.preview_target;
-        if target.0 == 0 || target.1 == 0 {
-            self.rendering = false;
-            cx.notify();
-            return;
-        }
-        let settings = self.settings.clone();
-        let paths = self.photos.clone();
-        let preview_state = self.preview_state.clone();
-        self.preview_task = Some(cx.spawn(async move |this, cx| {
-            let delay = trigger.delay();
-            if !delay.is_zero() {
-                Timer::after(delay).await;
-            }
-            if !request.is_current() {
-                return;
-            }
-            let worker_request = request.clone();
-            let preview_path = path.clone();
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    let mut preview_state = preview_state
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!(tr!("errors.renderer")))?;
-                    if !worker_request.is_current() {
-                        return Ok(None);
-                    }
-                    let state = preview_state.get_or_insert_with(PreviewState::default);
-                    state.photos.retain(&paths);
-                    let Some(mut pixels) = worker_request.run(
-                        || state.photos.load(&path, target.0.max(target.1)),
-                        |photo| {
-                            state
-                                .engine
-                                .compose_cached_preview(&photo, &settings, target)
-                        },
-                    )?
-                    else {
-                        return Ok(None);
-                    };
-                    let dimensions = pixels.dimensions();
-                    for pixel in pixels.pixels_mut() {
-                        pixel.0.swap(0, 2);
-                    }
-                    let image = Arc::new(RenderImage::new(vec![image::Frame::new(pixels)]));
-                    Ok::<_, anyhow::Error>(Some((image, dimensions)))
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if !request.is_current() {
-                    return;
-                }
-                this.rendering = false;
-                match result {
-                    Ok(Some((image, dimensions))) => {
-                        this.preview
-                            .publish(preview_path, image, std::time::Instant::now());
-                        this.preview_size = dimensions;
-                    }
-                    Err(e) => {
-                        this.preview.clear();
-                        this.status = tr!("errors.preview", error = format!("{e:#}"));
-                    }
-                    Ok(None) => {}
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
+        self.preview.refresh(
+            self.photos.get(self.selected).cloned(),
+            self.photos.clone(),
+            self.settings.render_settings(),
+            trigger,
+            cx,
+        );
     }
     pub(super) fn open_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.export_dialog.is_some() || self.settings_dialog.is_some() {
             return;
         }
-        let settings = self.settings.clone();
+        let settings = &self.settings;
         let count = self.photos.len();
         let parent = cx.entity().downgrade();
         let previous_focus = window.focused(cx);
@@ -317,131 +231,24 @@ impl Studio {
         cx.notify();
     }
     pub(super) fn export(&mut self, all: bool, cx: &mut Context<Self>) {
-        if self.exporting || self.photos.is_empty() {
+        if self.exports.is_running() || self.photos.is_empty() {
             return;
         }
         let Some(output) = self.settings.output.clone() else {
             self.status = tr!("status.choose_output");
-            self.pending_export = Some(all);
-            self.choose("output", cx);
+            self.exports.pending_scope = Some(all);
+            self.choose(FileChoice::Output, cx);
             cx.notify();
             return;
         };
         let paths = if all {
-            self.photos.clone()
+            self.photos.as_ref().clone()
         } else {
             vec![self.photos[self.selected].clone()]
         };
-        let total = paths.len();
-        self.progress = (0, total);
-        self.exporting = true;
-        self.failures.clear();
-        self.cancel.store(false, Ordering::Relaxed);
-        let cancel = self.cancel.clone();
-        let settings = self.settings.clone();
-        self.status = tr!("status.export_start", total = total);
-        cx.spawn(async move |this, cx| {
-            let started = std::time::Instant::now();
-            let options = photo_frame::batch::BatchOptions::default();
-            let worker_cancel = cancel.clone();
-            let receiver = cx
-                .background_executor()
-                .spawn(async move {
-                    photo_frame::batch::start(paths, output, settings, worker_cancel, options)
-                })
-                .await;
-            let mut receiver = match receiver {
-                Ok(receiver) => receiver,
-                Err(error) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.exporting = false;
-                        this.status = tr!("errors.export_start", error = error);
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-            let (mut processed, mut success) = (0, 0);
-            let mut active = std::collections::BTreeSet::new();
-            let mut peak_concurrent = 0;
-            loop {
-                let (next, event) = cx
-                    .background_executor()
-                    .spawn(async move {
-                        let event = receiver.recv();
-                        (receiver, event)
-                    })
-                    .await;
-                receiver = next;
-                let Ok(event) = event else {
-                    break;
-                };
-                if this
-                    .update(cx, |this, cx| {
-                        match event {
-                            photo_frame::batch::BatchEvent::Configured { .. } => {}
-                            photo_frame::batch::BatchEvent::Started { index, .. } => {
-                                active.insert(index);
-                                peak_concurrent = peak_concurrent.max(active.len());
-                            }
-                            photo_frame::batch::BatchEvent::Finished {
-                                index,
-                                source,
-                                result,
-                            } => {
-                                active.remove(&index);
-                                processed += 1;
-                                this.progress = (processed, total);
-                                match result {
-                                    Ok(_) => {
-                                        success += 1;
-                                        let _ = this.flush_preferences();
-                                    }
-                                    Err(error) => this.failures.push(format!(
-                                        "{}: {error:#}",
-                                        source.file_name().unwrap_or_default().to_string_lossy()
-                                    )),
-                                }
-                            }
-                        }
-                        this.status = tr!(
-                            "status.export_progress",
-                            processed = processed,
-                            total = total,
-                            success = success,
-                            active = active.len(),
-                            seconds = format!("{:.1}", started.elapsed().as_secs_f64())
-                        );
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    cancel.store(true, Ordering::Relaxed);
-                    return;
-                }
-            }
-            let _ = this.update(cx, |this, cx| {
-                this.exporting = false;
-                if processed < total && !cancel.load(Ordering::Relaxed) {
-                    this.failures
-                        .push(tr!("errors.incomplete", count = total - processed));
-                }
-                this.status = tr!(
-                    "status.export_done",
-                    result = if cancel.load(Ordering::Relaxed) {
-                        tr!("status.cancelled")
-                    } else {
-                        tr!("status.completed")
-                    },
-                    success = success,
-                    failed = this.failures.len(),
-                    peak = peak_concurrent,
-                    seconds = format!("{:.1}", started.elapsed().as_secs_f64())
-                );
-                cx.notify();
-            });
-        })
-        .detach();
+        self.status = tr!("status.export_start", total = paths.len());
+        self.exports
+            .start(paths, output, self.settings.render_settings(), cx);
         cx.notify();
     }
     pub(super) fn command(&mut self, command: Command, cx: &mut Context<Self>) {
@@ -451,7 +258,7 @@ impl Studio {
         let pending_restore = self.pending_preset_restore.take();
         match command {
             Command::Import => {
-                self.choose("photos", cx);
+                self.choose(FileChoice::Photos, cx);
                 return;
             }
             Command::Choose(kind) => {
@@ -459,17 +266,17 @@ impl Studio {
                 return;
             }
             Command::Cancel => {
-                self.cancel.store(true, Ordering::Relaxed);
+                self.exports.cancel();
                 self.status = tr!("status.stopping");
                 cx.notify();
                 return;
             }
             Command::Expand(section) => {
                 match section {
-                    "styles" => self.styles_open = !self.styles_open,
-                    "composition" => self.composition_open = !self.composition_open,
-                    "layout" => self.layout_open = !self.layout_open,
-                    _ => self.text_open = !self.text_open,
+                    PanelSection::Styles => self.styles_open = !self.styles_open,
+                    PanelSection::Composition => self.composition_open = !self.composition_open,
+                    PanelSection::Layout => self.layout_open = !self.layout_open,
+                    PanelSection::Text => self.text_open = !self.text_open,
                 }
                 cx.notify();
                 return;
@@ -482,35 +289,35 @@ impl Studio {
                 self.selected = index;
             }
             Command::Clear => {
-                self.photos.clear();
+                Arc::make_mut(&mut self.photos).clear();
                 self.thumbnails.clear();
                 self.filmstrip_scroll.set_offset(point(px(0.), px(0.)));
                 self.selected = 0;
             }
             Command::Remove => {
                 if !self.photos.is_empty() {
-                    let removed = self.photos.remove(self.selected);
+                    let removed = Arc::make_mut(&mut self.photos).remove(self.selected);
                     self.thumbnails.remove(&removed);
                     self.selected = self.selected.min(self.photos.len().saturating_sub(1));
                 }
             }
-            Command::Ratio(ratio) => self.settings.ratio = ratio,
-            Command::Background(bg) => self.settings.background = bg,
+            Command::Ratio(ratio) => self.settings.style.ratio = ratio,
+            Command::Background(bg) => self.settings.style.background = bg,
             Command::Color(color) => {
-                self.settings.color = color;
-                self.settings.text_color = if color.iter().map(|v| u32::from(*v)).sum::<u32>() > 384
-                {
-                    [45, 45, 43]
-                } else {
-                    [244, 244, 240]
-                };
+                self.settings.style.color = color;
+                self.settings.style.text_color =
+                    if color.iter().map(|v| u32::from(*v)).sum::<u32>() > 384 {
+                        [45, 45, 43]
+                    } else {
+                        [244, 244, 240]
+                    };
                 self.sync_inputs(cx);
             }
             Command::Font(family) => {
-                self.settings.font = None;
-                self.settings.font_family = Some(family.into());
+                self.settings.style.font = None;
+                self.settings.style.font_family = Some(family.into());
             }
-            Command::Align(align) => self.settings.align = align,
+            Command::Align(align) => self.settings.style.align = StyleNumber::Align.clamp(align),
             Command::CaptionDefault => {
                 let defaults = Settings::default();
                 self.settings
@@ -553,47 +360,15 @@ impl Studio {
                 return;
             }
             Command::Toggle(key) => match key {
-                "shadow" => self.settings.shadow = !self.settings.shadow,
-                "font_bold" => self.settings.font_bold = !self.settings.font_bold,
-                "font_italic" => self.settings.font_italic = !self.settings.font_italic,
-                "uppercase" => self.settings.uppercase = !self.settings.uppercase,
-                _ => self.settings.force_custom = !self.settings.force_custom,
-            },
-            Command::Number(key, delta) => {
-                let (value, min, max) = match key {
-                    "padding" => {
-                        self.settings
-                            .horizontal_padding
-                            .get_or_insert(self.settings.padding);
-                        (&mut self.settings.padding, 0, 30)
-                    }
-                    "horizontal_padding" => (
-                        self.settings
-                            .horizontal_padding
-                            .get_or_insert(self.settings.padding),
-                        0,
-                        30,
-                    ),
-                    "footer" => (&mut self.settings.footer, 0, 40),
-                    "radius" => (&mut self.settings.radius, 0, 20),
-                    "blur" => (&mut self.settings.blur, 0, 100),
-                    "background_dim" => (&mut self.settings.background_dim, 0, 90),
-                    "font_size" => (&mut self.settings.font_size, 8, 80),
-                    "line_gap" => (&mut self.settings.line_gap, 0, 40),
-                    "max_edge" => (&mut self.settings.max_edge, 0, 16000),
-                    _ => {
-                        self.settings.quality =
-                            (self.settings.quality as i32 + delta).clamp(1, 100) as u8;
-                        cx.notify();
-                        return;
-                    }
-                };
-                *value = (*value as i32 + delta).clamp(min, max) as u32;
-                if key == "max_edge" {
-                    cx.notify();
-                    return;
+                ToggleField::Shadow => self.settings.style.shadow = !self.settings.style.shadow,
+                ToggleField::FontBold => {
+                    self.settings.style.font_bold = !self.settings.style.font_bold
                 }
-            }
+                ToggleField::FontItalic => {
+                    self.settings.style.font_italic = !self.settings.style.font_italic
+                }
+            },
+            Command::Number(field, delta) => field.adjust(&mut self.settings.style, delta),
             Command::Reset => {
                 if self.settings.preset_modified() {
                     self.pending_preset_restore = self.settings.selected_preset;

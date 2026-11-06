@@ -1,4 +1,3 @@
-use crate::settings::Settings;
 use std::collections::BTreeMap;
 
 /// Read bounded TIFF IFDs from a decoder's EXIF block. Unsupported fields are ignored.
@@ -131,10 +130,16 @@ impl Tiff<'_> {
     }
 }
 
-pub fn expand(template: &str, metadata: &BTreeMap<String, String>, settings: &Settings) -> String {
+pub fn expand(
+    template: &str,
+    metadata: &BTreeMap<String, String>,
+    custom: &BTreeMap<String, String>,
+    force_custom: bool,
+    uppercase: bool,
+) -> String {
     let mut fields = metadata.clone();
-    for (key, value) in &settings.custom {
-        if settings.force_custom || fields.get(key).is_none_or(String::is_empty) {
+    for (key, value) in custom {
+        if force_custom || fields.get(key).is_none_or(String::is_empty) {
             fields.insert(key.clone(), value.clone());
         }
     }
@@ -180,16 +185,13 @@ pub fn expand(template: &str, metadata: &BTreeMap<String, String>, settings: &Se
         rest = &rest[start + end + 1..];
     }
     out.push_str(rest);
-    if settings.uppercase {
-        out.to_uppercase()
-    } else {
-        out
-    }
+    if uppercase { out.to_uppercase() } else { out }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::StyleSettings;
     #[test]
     fn malformed_exif_is_safe() {
         for len in 0..64 {
@@ -207,27 +209,93 @@ mod tests {
     #[test]
     fn custom_fallback_and_override() {
         let fields = BTreeMap::from([("model".into(), "Camera".into())]);
-        let mut s = Settings::default();
+        let mut s = StyleSettings::default();
         s.custom.insert("model".into(), "My camera".into());
-        assert_eq!(expand("{model} {unknown}", &fields, &s), "Camera —");
+        assert_eq!(
+            expand(
+                "{model} {unknown}",
+                &fields,
+                &s.custom,
+                s.force_custom,
+                s.uppercase
+            ),
+            "Camera —"
+        );
         s.force_custom = true;
-        assert_eq!(expand("{model}", &fields, &s), "My camera");
-        assert_eq!(expand("中文 {unfinished", &fields, &s), "中文 {unfinished");
+        assert_eq!(
+            expand("{model}", &fields, &s.custom, s.force_custom, s.uppercase),
+            "My camera"
+        );
+        assert_eq!(
+            expand(
+                "中文 {unfinished",
+                &fields,
+                &s.custom,
+                s.force_custom,
+                s.uppercase
+            ),
+            "中文 {unfinished"
+        );
     }
     #[test]
     fn nikon_captions_remove_corporation_and_duplicate_brand() {
-        let settings = Settings::default();
+        let settings = StyleSettings::default();
         for make in ["NIKON CORPORATION", "nikon coperation", "NIKON", "Nikon"] {
             let fields = BTreeMap::from([
                 ("make".into(), make.into()),
                 ("model".into(), "NIKON D7200".into()),
             ]);
-            assert_eq!(expand("{camera}", &fields, &settings), "Nikon D7200");
-            assert_eq!(expand("{make} {model}", &fields, &settings), "Nikon D7200");
-            assert_eq!(expand("{model}", &fields, &settings), "NIKON D7200");
+            assert_eq!(
+                expand(
+                    "{camera}",
+                    &fields,
+                    &settings.custom,
+                    settings.force_custom,
+                    settings.uppercase
+                ),
+                "Nikon D7200"
+            );
+            assert_eq!(
+                expand(
+                    "{make} {model}",
+                    &fields,
+                    &settings.custom,
+                    settings.force_custom,
+                    settings.uppercase
+                ),
+                "Nikon D7200"
+            );
+            assert_eq!(
+                expand(
+                    "{model}",
+                    &fields,
+                    &settings.custom,
+                    settings.force_custom,
+                    settings.uppercase
+                ),
+                "NIKON D7200"
+            );
         }
         let fields = BTreeMap::from([("model".into(), "NIKON D7200".into())]);
-        assert_eq!(expand("{camera}", &fields, &settings), "NIKON D7200");
-        assert_eq!(expand("{camera}", &BTreeMap::new(), &settings), "—");
+        assert_eq!(
+            expand(
+                "{camera}",
+                &fields,
+                &settings.custom,
+                settings.force_custom,
+                settings.uppercase
+            ),
+            "NIKON D7200"
+        );
+        assert_eq!(
+            expand(
+                "{camera}",
+                &BTreeMap::new(),
+                &settings.custom,
+                settings.force_custom,
+                settings.uppercase
+            ),
+            "—"
+        );
     }
 }

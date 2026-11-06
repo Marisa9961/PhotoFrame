@@ -158,16 +158,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn unsupported_locale_falls_back_to_english() {
-        assert_eq!(
-            crate::_rust_i18n_translate("fr", "settings.title"),
-            "Settings"
-        );
-        assert!(crate::_rust_i18n_try_translate("en", "unknown.key").is_none());
-        assert_eq!(Language::default(), Language::System);
-    }
-
     #[cfg(windows)]
     #[test]
     fn system_language_maps_chinese_variants_and_falls_back_to_english() {

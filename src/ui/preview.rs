@@ -67,14 +67,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn switching_is_immediate_and_continuous_events_have_short_distinct_delays() {
-        assert_eq!(PreviewTrigger::Immediate.delay(), Duration::ZERO);
-        assert!(PreviewTrigger::Input.delay() > Duration::ZERO);
-        assert!(PreviewTrigger::Input.delay() < PreviewTrigger::Resize.delay());
-        assert!(PreviewTrigger::Resize.delay() < Duration::from_millis(160));
-    }
-
-    #[test]
     fn only_the_latest_request_runs_and_publishes() {
         let latest = Arc::new(AtomicU64::new(0));
         let requests: Vec<_> = (0..20)

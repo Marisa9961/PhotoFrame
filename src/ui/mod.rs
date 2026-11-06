@@ -1,9 +1,11 @@
 mod controller;
 mod export_dialog;
+mod export_session;
 mod filmstrip;
 mod input;
 mod panels;
 mod preview;
+mod preview_coordinator;
 mod preview_display;
 mod settings_dialog;
 mod thumbnails;
@@ -14,20 +16,13 @@ use export_dialog::ExportDialog;
 use gpui::{prelude::*, *};
 pub(crate) use input::init;
 use input::{Changed, TextInput};
+use photo_frame::settings::{
+    Background, ExportNumber, Format, Ratio, Settings, StyleNumber, StylePreset,
+};
 use photo_frame::{i18n::Language, tr};
-use photo_frame::{
-    render::{Engine, PreviewCache},
-    settings::{Background, Format, Ratio, Settings, StylePreset},
-};
-use preview::{PreviewRequest, PreviewTrigger};
+use preview::PreviewTrigger;
 use settings_dialog::SettingsDialog;
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-};
+use std::{path::PathBuf, sync::Arc};
 use widgets::*;
 
 const BG: u32 = 0x101a17;
@@ -40,11 +35,10 @@ pub struct Studio {
     settings: Settings,
     persisted_settings: Settings,
     preference_error: Option<String>,
-    photos: Vec<PathBuf>,
+    photos: Arc<Vec<PathBuf>>,
     selected: usize,
-    preview: preview_display::PreviewDisplay,
-    preview_size: (u32, u32),
-    preview_target: (u32, u32),
+    preview: preview_coordinator::PreviewCoordinator,
+    exports: export_session::ExportSession,
     thumbnails: thumbnails::Thumbnails,
     thumbnail_task: Option<Task<()>>,
     filmstrip_scroll: ScrollHandle,
@@ -55,17 +49,8 @@ pub struct Studio {
     text_open: bool,
     export_dialog: Option<Entity<ExportDialog>>,
     settings_dialog: Option<Entity<SettingsDialog>>,
-    pending_export: Option<bool>,
     pending_preset_restore: Option<StylePreset>,
     status: String,
-    rendering: bool,
-    exporting: bool,
-    progress: (usize, usize),
-    failures: Vec<String>,
-    preview_state: Arc<Mutex<Option<PreviewState>>>,
-    generation: Arc<AtomicU64>,
-    preview_task: Option<Task<()>>,
-    cancel: Arc<AtomicBool>,
     color_input: Entity<TextInput>,
     title_input: Entity<TextInput>,
     subtitle_input: Entity<TextInput>,
@@ -73,18 +58,13 @@ pub struct Studio {
     _subscriptions: Vec<Subscription>,
 }
 
-#[derive(Default)]
-struct PreviewState {
-    engine: Engine,
-    photos: PreviewCache,
-}
 #[derive(Clone)]
 enum Command {
     Import,
     Clear,
     Remove,
     Select(usize),
-    Expand(&'static str),
+    Expand(PanelSection),
     Preset(usize),
     RequestPresetRestore(usize),
     ConfirmPresetRestore(usize),
@@ -92,15 +72,56 @@ enum Command {
     Ratio(Ratio),
     Background(Background),
     Color([u8; 3]),
-    Toggle(&'static str),
-    Number(&'static str, i32),
+    Toggle(ToggleField),
+    Number(StyleNumber, i32),
     Font(&'static str),
     Align(u32),
     CaptionDefault,
     TemplateSave,
     TemplateApply(usize),
     TemplateDelete(usize),
-    Choose(&'static str),
+    Choose(FileChoice),
     Reset,
     Cancel,
+}
+
+#[derive(Clone, Copy)]
+enum PanelSection {
+    Styles,
+    Composition,
+    Layout,
+    Text,
+}
+impl PanelSection {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Styles => "styles",
+            Self::Composition => "composition",
+            Self::Layout => "layout",
+            Self::Text => "text",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ToggleField {
+    Shadow,
+    FontBold,
+    FontItalic,
+}
+impl ToggleField {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Shadow => "shadow",
+            Self::FontBold => "font_bold",
+            Self::FontItalic => "font_italic",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FileChoice {
+    Photos,
+    Font,
+    Output,
 }

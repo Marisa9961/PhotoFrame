@@ -1,12 +1,12 @@
 use super::MIB;
 use crate::tr;
-use crate::{render, settings::Settings};
+use crate::{render, settings::RenderSettings};
 use anyhow::Result;
 use image::ImageDecoder;
 use std::path::Path;
 
 /// Conservative working-set estimate, including full input decode and intermediate output buffers.
-pub fn estimate_peak_bytes(path: &Path, settings: &Settings) -> Result<u64> {
+pub fn estimate_peak_bytes(path: &Path, settings: &RenderSettings) -> Result<u64> {
     let decoder = image::ImageReader::open(path)?
         .with_guessed_format()?
         .into_decoder()?;
@@ -20,17 +20,7 @@ pub fn estimate_peak_bytes(path: &Path, settings: &Settings) -> Result<u64> {
     let output_pixels = [(w, h), (h, w)]
         .into_iter()
         .map(|(w, h)| {
-            let initial = render::layout(w, h, &settings);
-            let scale = if settings.max_edge == 0 {
-                1.
-            } else {
-                (settings.max_edge as f64 / initial.width.max(initial.height) as f64).min(1.)
-            };
-            let layout = render::layout(
-                (w as f64 * scale).round().max(1.) as u32,
-                (h as f64 * scale).round().max(1.) as u32,
-                &settings,
-            );
+            let layout = render::export_layout(w, h, &settings);
             u64::from(layout.width) * u64::from(layout.height)
         })
         .max()

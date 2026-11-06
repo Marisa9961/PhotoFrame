@@ -1,5 +1,6 @@
 use super::effects::{inside, shadow_mask};
 use super::*;
+use crate::settings::StyleSettings;
 use crate::settings::{Background, Ratio};
 
 fn cached_photo() -> Arc<Photo> {
@@ -28,12 +29,15 @@ fn preview_rounding_preserves_the_cached_canvas_without_resampling() {
         )),
         fields: Default::default(),
     });
-    let settings = Settings {
-        background: Background::Solid,
-        shadow: false,
-        title: String::new(),
-        subtitle: String::new(),
-        ..Settings::default()
+    let settings = RenderSettings {
+        style: StyleSettings {
+            background: Background::Solid,
+            shadow: false,
+            title: String::new(),
+            subtitle: String::new(),
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let mut engine = Engine::default();
     let actual = engine
@@ -58,9 +62,12 @@ fn preview_layout_fits_both_axes_without_upscaling_the_photo() {
             Ratio::Portrait,
             Ratio::Wide,
         ] {
-            let settings = Settings {
-                ratio,
-                ..Settings::default()
+            let settings = RenderSettings {
+                style: StyleSettings {
+                    ratio,
+                    ..Default::default()
+                },
+                ..RenderSettings::default()
             };
             for viewport in [(1536, 864), (864, 1536), (137, 93)] {
                 let layout = layout::preview_layout(w, h, &settings, viewport);
@@ -74,7 +81,7 @@ fn preview_layout_fits_both_axes_without_upscaling_the_photo() {
     let photo = cached_photo();
     let mut engine = Engine::default();
     let tiny = engine
-        .compose_preview(&photo, &Settings::default(), (1, 1))
+        .compose_preview(&photo, &RenderSettings::default(), (1, 1))
         .unwrap();
     assert_eq!(tiny.dimensions(), (1, 1));
 }
@@ -84,32 +91,36 @@ fn cached_preview_caption_edits_match_fresh_render_without_rebuilding_base() {
     let photo = cached_photo();
     let mut engine = Engine::default();
     let mut reference = Engine::default();
-    let mut settings = Settings {
-        footer: 30,
-        title: "Original".into(),
-        subtitle: String::new(),
-        ..Settings::default()
+    let mut settings = RenderSettings {
+        style: StyleSettings {
+            footer: 30,
+            title: "Original".into(),
+            subtitle: String::new(),
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let original = engine
         .compose_cached_preview(&photo, &settings, (400, 400))
         .unwrap();
     for edit in 0..10 {
         match edit {
-            0 => settings.title = "{camera}".into(),
-            1 => settings.subtitle = "Second line".into(),
-            2 => settings.text_color = [20, 200, 90],
-            3 => settings.font_size = 42,
-            4 => settings.line_gap = 8,
-            5 => settings.align = 0,
-            6 => settings.font_bold = !settings.font_bold,
-            7 => settings.font_italic = !settings.font_italic,
-            8 => settings.font_family = Some("monospace".into()),
+            0 => settings.style.title = "{camera}".into(),
+            1 => settings.style.subtitle = "Second line".into(),
+            2 => settings.style.text_color = [20, 200, 90],
+            3 => settings.style.font_size = 42,
+            4 => settings.style.line_gap = 8,
+            5 => settings.style.align = 0,
+            6 => settings.style.font_bold = !settings.style.font_bold,
+            7 => settings.style.font_italic = !settings.style.font_italic,
+            8 => settings.style.font_family = Some("monospace".into()),
             _ => {
-                settings.force_custom = true;
+                settings.style.force_custom = true;
                 settings
+                    .style
                     .custom
                     .insert("camera".into(), "Edited camera".into());
-                settings.uppercase = true;
+                settings.style.uppercase = true;
             }
         }
         let cached = engine
@@ -139,22 +150,22 @@ fn cached_preview_invalidates_for_each_base_dependency_and_viewport() {
     let photo = cached_photo();
     let mut engine = Engine::default();
     let mut reference = Engine::default();
-    let mut settings = Settings::default();
+    let mut settings = RenderSettings::default();
     engine
         .compose_cached_preview(&photo, &settings, (400, 400))
         .unwrap();
     for edit in 0..10 {
         match edit {
-            0 => settings.padding += 2,
-            1 => settings.horizontal_padding = Some(12),
-            2 => settings.footer += 8,
-            3 => settings.ratio = Ratio::Square,
-            4 => settings.blur = 15,
-            5 => settings.background_dim = 70,
-            6 => settings.radius = 10,
-            7 => settings.shadow = false,
-            8 => settings.background = Background::Solid,
-            _ => settings.color = [12, 34, 56],
+            0 => settings.style.padding += 2,
+            1 => settings.style.horizontal_padding = Some(12),
+            2 => settings.style.footer += 8,
+            3 => settings.style.ratio = Ratio::Square,
+            4 => settings.style.blur = 15,
+            5 => settings.style.background_dim = 70,
+            6 => settings.style.radius = 10,
+            7 => settings.style.shadow = false,
+            8 => settings.style.background = Background::Solid,
+            _ => settings.style.color = [12, 34, 56],
         }
         let cached = engine
             .compose_cached_preview(&photo, &settings, (400, 400))
@@ -187,7 +198,7 @@ fn cached_preview_invalidates_for_each_base_dependency_and_viewport() {
 fn cached_preview_replaces_source_and_does_not_affect_export() {
     let mut photo = cached_photo();
     let mut engine = Engine::default();
-    let settings = Settings::default();
+    let settings = RenderSettings::default();
     let original = engine
         .compose_cached_preview(&photo, &settings, (400, 400))
         .unwrap();
@@ -224,14 +235,17 @@ fn oversized_preview_base_is_not_retained() {
         image: DynamicImage::ImageRgb8(image::RgbImage::new(3000, 3000)),
         fields: Default::default(),
     });
-    let settings = Settings {
-        background: Background::Solid,
-        padding: 0,
-        horizontal_padding: Some(0),
-        footer: 0,
-        shadow: false,
-        radius: 0,
-        ..Settings::default()
+    let settings = RenderSettings {
+        style: StyleSettings {
+            background: Background::Solid,
+            padding: 0,
+            horizontal_padding: Some(0),
+            footer: 0,
+            shadow: false,
+            radius: 0,
+            ..Default::default()
+        },
+        ..RenderSettings::default()
     };
     let mut engine = Engine::default();
     let output = engine
@@ -252,14 +266,17 @@ fn preview_fits_display_pixels_without_changing_export_settings() {
         )),
         fields: Default::default(),
     };
-    let settings = Settings {
-        background: Background::Solid,
-        padding: 0,
-        horizontal_padding: Some(0),
-        footer: 0,
-        shadow: false,
+    let settings = RenderSettings {
+        style: StyleSettings {
+            background: Background::Solid,
+            padding: 0,
+            horizontal_padding: Some(0),
+            footer: 0,
+            shadow: false,
+            ..Default::default()
+        },
         max_edge: 100,
-        ..Settings::default()
+        ..RenderSettings::default()
     };
     let mut engine = Engine::default();
     let preview = engine
@@ -288,9 +305,12 @@ fn ratios_contain_photo() {
             Ratio::Portrait,
             Ratio::Wide,
         ] {
-            let s = Settings {
-                ratio,
-                ..Settings::default()
+            let s = RenderSettings {
+                style: StyleSettings {
+                    ratio,
+                    ..Default::default()
+                },
+                ..RenderSettings::default()
             };
             let l = layout(w, h, &s);
             assert!(l.x + w <= l.width);
@@ -319,7 +339,7 @@ fn row_spans_match_the_original_pixel_mask() {
 }
 #[test]
 fn small_shadow_mask_remains_close_to_full_resolution_reference() {
-    let settings = Settings::default();
+    let settings = RenderSettings::default();
     let layout = layout(1160, 772, &settings);
     let radius = 15;
     let mut reference = RgbaImage::new(layout.width, layout.height);

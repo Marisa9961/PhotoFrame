@@ -1,5 +1,5 @@
 use super::{ComposeTimings, Layout, Photo, effects::shadow_mask};
-use crate::settings::{Background, Settings};
+use crate::settings::{Background, RenderSettings};
 use image::{GrayImage, Rgba, RgbaImage, imageops};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::{
@@ -16,12 +16,12 @@ pub(super) struct Layers {
 
 pub(super) fn prepare(
     photo: &Photo,
-    settings: &Settings,
+    settings: &RenderSettings,
     layout: &Layout,
     preview: bool,
 ) -> Layers {
     let worthwhile = u64::from(layout.width) * u64::from(layout.height) >= 256 * 256
-        && (settings.background == Background::Blur || settings.shadow);
+        && (settings.style.background == Background::Blur || settings.style.shadow);
     let pool = if preview && worthwhile {
         preview_pool()
     } else {
@@ -56,7 +56,12 @@ fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
     (value, started.elapsed())
 }
 
-fn prepare_with_pool(photo: &Photo, s: &Settings, l: &Layout, pool: Option<&ThreadPool>) -> Layers {
+fn prepare_with_pool(
+    photo: &Photo,
+    s: &RenderSettings,
+    l: &Layout,
+    pool: Option<&ThreadPool>,
+) -> Layers {
     let foreground = || {
         timed(|| {
             photo
@@ -68,9 +73,9 @@ fn prepare_with_pool(photo: &Photo, s: &Settings, l: &Layout, pool: Option<&Thre
     let background = || timed(|| background(photo, s, l));
     let shadow = || {
         timed(|| {
-            s.shadow.then(|| {
+            s.style.shadow.then(|| {
                 let radius =
-                    (l.photo_w.min(l.photo_h) as f32 * s.radius as f32 / 100.).round() as u32;
+                    (l.photo_w.min(l.photo_h) as f32 * s.style.radius as f32 / 100.).round() as u32;
                 shadow_mask(l, radius)
             })
         })
@@ -96,12 +101,12 @@ fn prepare_with_pool(photo: &Photo, s: &Settings, l: &Layout, pool: Option<&Thre
     }
 }
 
-fn background(photo: &Photo, s: &Settings, l: &Layout) -> RgbaImage {
-    match s.background {
+fn background(photo: &Photo, s: &RenderSettings, l: &Layout) -> RgbaImage {
+    match s.style.background {
         Background::Solid => RgbaImage::from_pixel(
             l.width,
             l.height,
-            Rgba([s.color[0], s.color[1], s.color[2], 255]),
+            Rgba([s.style.color[0], s.style.color[1], s.style.color[2], 255]),
         ),
         Background::Blur => {
             let bg_scale = (480. / l.width.max(l.height) as f32).min(1.);
@@ -110,13 +115,13 @@ fn background(photo: &Photo, s: &Settings, l: &Layout) -> RgbaImage {
                 (l.height as f32 * bg_scale).max(1.) as u32,
                 imageops::FilterType::Triangle,
             );
-            let bg = bg.blur(s.blur as f32 * 0.25);
+            let bg = bg.blur(s.style.blur as f32 * 0.25);
             let mut bg = bg
                 .resize_exact(l.width, l.height, imageops::FilterType::Triangle)
                 .to_rgba8();
             for pixel in bg.pixels_mut() {
                 for channel in &mut pixel.0[..3] {
-                    *channel = (u32::from(*channel) * (100 - s.background_dim) / 100) as u8;
+                    *channel = (u32::from(*channel) * (100 - s.style.background_dim) / 100) as u8;
                 }
             }
             bg
@@ -127,6 +132,7 @@ fn background(photo: &Photo, s: &Settings, l: &Layout) -> RgbaImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::StyleSettings;
     use image::DynamicImage;
 
     #[test]
@@ -141,10 +147,13 @@ mod tests {
             };
             for background in [Background::Solid, Background::Blur] {
                 for shadow in [false, true] {
-                    let settings = Settings {
-                        background,
-                        shadow,
-                        ..Settings::default()
+                    let settings = RenderSettings {
+                        style: StyleSettings {
+                            background,
+                            shadow,
+                            ..Default::default()
+                        },
+                        ..RenderSettings::default()
                     };
                     let layout = super::super::layout(120, 75, &settings);
                     let serial = prepare_with_pool(&photo, &settings, &layout, None);
